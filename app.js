@@ -4,7 +4,7 @@
 // Uses Whisper via Transformers.js (runs in-browser)
 // =========================================
 
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.1';
+// import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.1';
 
 // =========================================
 // DOM Elements
@@ -36,7 +36,7 @@ const btnNew = document.getElementById('btn-new');
 // State
 // =========================================
 let currentFiles = []; // Array of { id, file }
-let transcriber = null;
+let aiWorker = null;
 let transcriptionResults = []; // Array of { fileName, text, chunks }
 let mediaRecorder = null;
 let audioChunks = [];
@@ -51,11 +51,19 @@ let fileIdCounter = 0;
 // Click to upload
 uploadZone.addEventListener('click', () => fileInput.click());
 
+// Add more files after initial selection
+const btnAddMore = document.getElementById('btn-add-more');
+if (btnAddMore) {
+    btnAddMore.addEventListener('click', () => fileInput.click());
+}
+
 // File selected
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         handleFiles(e.target.files);
     }
+    // Clear the input so the same files can be selected again if needed
+    e.target.value = '';
 });
 
 // Drag & Drop
@@ -283,36 +291,56 @@ async function startTranscription() {
     const totalFiles = currentFiles.length;
 
     try {
-        // Step 1: Load model (once for all files)
         const selectedModel = modelSelect.value;
         const selectedLang = languageSelect.value;
         const lang = selectedLang === 'null' ? null : selectedLang;
 
         updateProgress('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
 
-        if (!transcriber || transcriber._modelId !== selectedModel) {
-            transcriber = await pipeline(
-                'automatic-speech-recognition',
-                selectedModel,
-                {
-                    dtype: 'q8',
-                    device: 'wasm',
-                    progress_callback: (progress) => {
-                        if (progress.status === 'progress' && progress.progress) {
-                            const pct = Math.round(progress.progress);
-                            updateProgress(
-                                'Baixando modelo de IA...',
-                                `${progress.file || ''} — ${pct}%`,
-                                5 + (pct * 0.25)
-                            );
-                        } else if (progress.status === 'ready') {
-                            updateProgress('Modelo carregado!', 'Iniciando transcrições...', 35);
-                        }
-                    }
-                }
-            );
-            transcriber._modelId = selectedModel;
+        // Initialize worker if needed
+        if (!aiWorker) {
+            aiWorker = new Worker('worker.js', { type: 'module' });
         }
+
+        // Helper to run commands on worker as Promises
+        const runCommand = (commandData, onProgress) => {
+            return new Promise((resolve, reject) => {
+                const handler = (event) => {
+                    const { type, data, error } = event.data;
+                    if (type === 'progress') {
+                        if (onProgress) onProgress(data);
+                    } else if (type === 'ready') {
+                        aiWorker.removeEventListener('message', handler);
+                        resolve();
+                    } else if (type === 'result') {
+                        aiWorker.removeEventListener('message', handler);
+                        resolve(data);
+                    } else if (type === 'error') {
+                        aiWorker.removeEventListener('message', handler);
+                        reject(new Error(error));
+                    }
+                };
+                aiWorker.addEventListener('message', handler);
+                aiWorker.postMessage(commandData);
+            });
+        };
+
+        // Step 1: Load model
+        await runCommand(
+            { type: 'load', model: selectedModel },
+            (progress) => {
+                if (progress.status === 'progress' && progress.progress) {
+                    const pct = Math.round(progress.progress);
+                    updateProgress(
+                        'Baixando modelo de IA...',
+                        `${progress.file || ''} — ${pct}%`,
+                        5 + (pct * 0.25)
+                    );
+                } else if (progress.status === 'ready') {
+                    updateProgress('Modelo carregado!', 'Iniciando transcrições...', 35);
+                }
+            }
+        );
 
         // Step 2: Transcribe each file
         const transcriptionOptions = {
@@ -320,9 +348,7 @@ async function startTranscription() {
             stride_length_s: 5,
             return_timestamps: true,
         };
-        if (lang) {
-            transcriptionOptions.language = lang;
-        }
+        if (lang) transcriptionOptions.language = lang;
 
         for (let i = 0; i < totalFiles; i++) {
             const { file } = currentFiles[i];
@@ -350,7 +376,12 @@ async function startTranscription() {
                 file.name,
                 baseProgress + (fileProgress * 0.4)
             );
-            const result = await transcriber(audioData, transcriptionOptions);
+            
+            const result = await runCommand({
+                type: 'transcribe',
+                audioData: audioData,
+                options: transcriptionOptions
+            });
 
             transcriptionResults.push({
                 fileName: file.name,

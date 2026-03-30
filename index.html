@@ -86,14 +86,23 @@
         <section class="file-info-section hidden" id="file-info-section">
             <div class="files-header">
                 <span class="files-count" id="files-count">1 arquivo selecionado</span>
-                <button class="btn-clear-all" id="btn-clear-all" title="Remover todos">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 6h18"/>
-                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                    </svg>
-                    Limpar tudo
-                </button>
+                <div class="files-actions" style="display: flex; gap: 8px;">
+                    <button class="btn-clear-all" id="btn-add-more" title="Adicionar mais">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Adicionar Mais
+                    </button>
+                    <button class="btn-clear-all" id="btn-clear-all" title="Remover todos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"/>
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                        </svg>
+                        Limpar tudo
+                    </button>
+                </div>
             </div>
             <div class="files-list" id="files-list">
                 <!-- File items rendered dynamically -->
