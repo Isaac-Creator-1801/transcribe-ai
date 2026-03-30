@@ -36,6 +36,14 @@
             <p class="hero-subtitle">IA rodando direto no seu navegador. Sem cadastro, sem limites, 100% gratuito.</p>
         </section>
 
+        <!-- Navigation Tabs -->
+        <section class="tabs-section">
+            <div class="tabs-container">
+                <button class="tab-button active" id="tab-transcribe">Transcrição</button>
+                <button class="tab-button" id="tab-convert">Conversão</button>
+            </div>
+        </section>
+
         <!-- Upload Area -->
         <section class="upload-section" id="upload-section">
             <div class="upload-zone" id="upload-zone">
@@ -192,6 +200,129 @@
                 </svg>
                 Nova Transcrição
             </button>
+        </section>
+
+        <!-- Converter Section -->
+        <section class="converter-section hidden" id="converter-section">
+            <div class="converter-container">
+                <h2 class="converter-title">Converter Arquivos</h2>
+                <p class="converter-subtitle">Converta vídeos e áudios para diferentes formatos</p>
+                
+                <!-- Upload Area for Converter -->
+                <div class="upload-zone" id="converter-upload-zone">
+                    <div class="upload-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" x2="12" y1="3" y2="15"/>
+                        </svg>
+                    </div>
+                    <h3 class="upload-title">Arraste seus arquivos aqui</h3>
+                    <p class="upload-text">ou clique para selecionar (múltiplos arquivos)</p>
+                    <div class="upload-formats">
+                        <span class="format-tag">MP4</span>
+                        <span class="format-tag">WEBM</span>
+                        <span class="format-tag">MOV</span>
+                        <span class="format-tag">AVI</span>
+                        <span class="format-tag">MKV</span>
+                    </div>
+                    <input type="file" id="converter-file-input" accept="video/*,audio/*" multiple hidden>
+                </div>
+
+                <!-- Conversion Settings -->
+                <div class="settings-row converter-settings hidden" id="converter-settings">
+                    <div class="setting-group">
+                        <label class="setting-label">Formato de Saída</label>
+                        <select class="setting-select" id="output-format-select">
+                            <option value="mp3">MP3 (Áudio)</option>
+                            <option value="wav">WAV (Áudio)</option>
+                            <option value="ogg">OGG (Áudio)</option>
+                            <option value="m4a">M4A (Áudio)</option>
+                            <option value="flac">FLAC (Áudio)</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label">Qualidade</label>
+                        <select class="setting-select" id="quality-select">
+                            <option value="high">Alta (320 kbps)</option>
+                            <option value="medium" selected>Média (192 kbps)</option>
+                            <option value="low">Baixa (128 kbps)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- File Info for Converter -->
+                <div class="file-info-section hidden" id="converter-file-info">
+                    <div class="files-header">
+                        <span class="files-count" id="converter-files-count">1 arquivo selecionado</span>
+                        <div class="files-actions">
+                            <button class="btn-clear-all" id="converter-btn-clear-all" title="Remover todos">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18"/>
+                                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                </svg>
+                                Limpar tudo
+                            </button>
+                        </div>
+                    </div>
+                    <div class="files-list" id="converter-files-list">
+                        <!-- File items rendered dynamically -->
+                    </div>
+                </div>
+
+                <!-- Convert Button -->
+                <button class="btn-transcribe hidden" id="btn-convert">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    Converter Arquivos
+                </button>
+
+                <!-- Progress Section for Converter -->
+                <section class="progress-section hidden" id="converter-progress-section">
+                    <div class="progress-card">
+                        <div class="progress-header">
+                            <div class="progress-spinner"></div>
+                            <div class="progress-info">
+                                <span class="progress-title" id="converter-progress-title">Processando arquivo...</span>
+                                <span class="progress-detail" id="converter-progress-detail">Isso pode levar alguns segundos</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="converter-progress-bar"></div>
+                        </div>
+                        <span class="progress-percent" id="converter-progress-percent">0%</span>
+                    </div>
+                </section>
+
+                <!-- Results Section for Converter -->
+                <section class="result-section hidden" id="converter-result-section">
+                    <div class="result-header">
+                        <h2 class="result-title">📥 Arquivos Convertidos</h2>
+                        <div class="result-actions">
+                            <button class="btn-action" id="converter-btn-download-all" title="Baixar tudo">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" x2="12" y1="15" y2="3"/>
+                                </svg>
+                                Baixar Tudo
+                            </button>
+                        </div>
+                    </div>
+                    <div class="results-container" id="converter-results-container">
+                        <!-- Result cards rendered dynamically -->
+                    </div>
+                    <button class="btn-new" id="converter-btn-new">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" x2="12" y1="5" y2="19"/>
+                            <line x1="5" x2="19" y1="12" y2="12"/>
+                        </svg>
+                        Nova Conversão
+                    </button>
+                </section>
+            </div>
         </section>
 
         <!-- Footer -->
