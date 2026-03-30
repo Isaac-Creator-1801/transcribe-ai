@@ -414,7 +414,7 @@ body::before {
 }
 
 /* =========================================
-   File Info Card
+   File Info - Multiple Files
    ========================================= */
 
 .file-info-section {
@@ -422,41 +422,107 @@ body::before {
     animation: slideUp 0.4s ease;
 }
 
-.file-info-card {
+.files-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.files-count {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.btn-clear-all {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition);
+}
+
+.btn-clear-all:hover {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: var(--error);
+    color: var(--error);
+}
+
+.files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.files-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.files-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.files-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 100px;
+}
+
+.file-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 16px 20px;
-    margin-bottom: 16px;
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    transition: var(--transition);
+    animation: slideUp 0.3s ease;
 }
 
-.file-info-left {
+.file-item:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+}
+
+.file-item-left {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
+    min-width: 0;
 }
 
-.file-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-md);
+.file-item-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-sm);
     background: var(--accent-gradient);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
+    flex-shrink: 0;
 }
 
-.file-details {
+.file-item-details {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
-.file-name {
-    font-size: 0.95rem;
+.file-item-name {
+    font-size: 0.9rem;
     font-weight: 600;
     color: var(--text-primary);
     max-width: 320px;
@@ -465,15 +531,16 @@ body::before {
     white-space: nowrap;
 }
 
-.file-size {
-    font-size: 0.8rem;
+.file-item-size {
+    font-size: 0.75rem;
     color: var(--text-muted);
 }
 
-.btn-remove {
-    width: 36px; height: 36px;
+.btn-remove-file {
+    width: 32px;
+    height: 32px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -481,9 +548,10 @@ body::before {
     align-items: center;
     justify-content: center;
     transition: var(--transition);
+    flex-shrink: 0;
 }
 
-.btn-remove:hover {
+.btn-remove-file:hover {
     background: rgba(248, 113, 113, 0.1);
     border-color: var(--error);
     color: var(--error);
@@ -675,7 +743,7 @@ body::before {
 }
 
 /* =========================================
-   Result
+   Result - Multiple Cards
    ========================================= */
 
 .result-section {
@@ -686,7 +754,7 @@ body::before {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     flex-wrap: wrap;
     gap: 12px;
 }
@@ -723,64 +791,178 @@ body::before {
     color: var(--accent);
 }
 
-.btn-action.copied {
-    background: var(--success-bg);
-    border-color: var(--success);
-    color: var(--success);
-}
-
-.result-stats {
+.results-container {
     display: flex;
-    gap: 16px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-}
-
-.stat-item {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.stat-value {
-    color: var(--text-secondary);
-    font-weight: 600;
-}
-
-.result-content {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 24px;
-    max-height: 500px;
-    overflow-y: auto;
+    flex-direction: column;
+    gap: 12px;
     margin-bottom: 20px;
 }
 
-.result-content::-webkit-scrollbar {
-    width: 6px;
+/* Individual Result Card */
+.result-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: var(--transition);
+    animation: slideUp 0.4s ease;
+    animation-fill-mode: backwards;
 }
 
-.result-content::-webkit-scrollbar-track {
+.result-card:nth-child(1) { animation-delay: 0s; }
+.result-card:nth-child(2) { animation-delay: 0.05s; }
+.result-card:nth-child(3) { animation-delay: 0.1s; }
+.result-card:nth-child(4) { animation-delay: 0.15s; }
+.result-card:nth-child(5) { animation-delay: 0.2s; }
+
+.result-card:hover {
+    border-color: var(--border-hover);
+}
+
+.result-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: var(--transition);
+    gap: 12px;
+}
+
+.result-card-header:hover {
+    background: rgba(124, 92, 252, 0.03);
+}
+
+.result-card-title {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.result-card-number {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.result-card-file-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.result-card-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.result-card-stats {
+    display: flex;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.result-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.btn-card-action {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.btn-card-action:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+    color: var(--accent);
+}
+
+.btn-card-toggle {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.btn-card-toggle:hover {
+    color: var(--text-primary);
+}
+
+.btn-card-toggle svg {
+    transition: transform 0.3s ease;
+}
+
+.result-card-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0 20px;
+    border-top: 0px solid transparent;
+}
+
+.result-card-content.open {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--border);
+}
+
+.result-card-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.result-card-content::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.result-content::-webkit-scrollbar-thumb {
+.result-card-content::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 100px;
 }
 
-.result-content p {
-    font-size: 0.95rem;
+.result-card-content p {
+    font-size: 0.9rem;
     line-height: 1.8;
     color: var(--text-primary);
 }
 
-.result-content .timestamp {
+.result-card-content .timestamp {
     display: inline-block;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 600;
     color: var(--accent);
     background: rgba(124, 92, 252, 0.1);
@@ -791,10 +973,11 @@ body::before {
 }
 
 .chunk {
-    margin-bottom: 12px;
-    padding: 8px 12px;
+    margin-bottom: 10px;
+    padding: 6px 10px;
     border-radius: var(--radius-sm);
     transition: var(--transition);
+    font-size: 0.9rem;
 }
 
 .chunk:hover {

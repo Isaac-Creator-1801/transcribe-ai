@@ -1,5 +1,6 @@
 // =========================================
 // TranscribeAI - App Logic
+// Supports multiple file transcription
 // Uses Whisper via Transformers.js (runs in-browser)
 // =========================================
 
@@ -14,10 +15,9 @@ const btnRecord = document.getElementById('btn-record');
 const recordingTimer = document.getElementById('recording-timer');
 const uploadSection = document.getElementById('upload-section');
 const fileInfoSection = document.getElementById('file-info-section');
-const fileName = document.getElementById('file-name');
-const fileSize = document.getElementById('file-size');
-const fileIcon = document.getElementById('file-icon');
-const btnRemove = document.getElementById('btn-remove');
+const filesList = document.getElementById('files-list');
+const filesCount = document.getElementById('files-count');
+const btnClearAll = document.getElementById('btn-clear-all');
 const btnTranscribe = document.getElementById('btn-transcribe');
 const languageSelect = document.getElementById('language-select');
 const modelSelect = document.getElementById('model-select');
@@ -27,23 +27,22 @@ const progressDetail = document.getElementById('progress-detail');
 const progressBar = document.getElementById('progress-bar');
 const progressPercent = document.getElementById('progress-percent');
 const resultSection = document.getElementById('result-section');
-const resultContent = document.getElementById('result-content');
-const resultStats = document.getElementById('result-stats');
-const btnCopy = document.getElementById('btn-copy');
-const btnDownload = document.getElementById('btn-download');
-const btnDownloadSrt = document.getElementById('btn-download-srt');
+const resultsContainer = document.getElementById('results-container');
+const btnCopyAll = document.getElementById('btn-copy-all');
+const btnDownloadAll = document.getElementById('btn-download-all');
 const btnNew = document.getElementById('btn-new');
 
 // =========================================
 // State
 // =========================================
-let currentFile = null;
+let currentFiles = []; // Array of { id, file }
 let transcriber = null;
-let transcriptionChunks = [];
+let transcriptionResults = []; // Array of { fileName, text, chunks }
 let mediaRecorder = null;
 let audioChunks = [];
 let recordingInterval = null;
 let startTime = null;
+let fileIdCounter = 0;
 
 // =========================================
 // File Upload Handling
@@ -55,7 +54,7 @@ uploadZone.addEventListener('click', () => fileInput.click());
 // File selected
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        handleFile(e.target.files[0]);
+        handleFiles(e.target.files);
     }
 });
 
@@ -65,15 +64,30 @@ uploadZone.addEventListener('dragover', (e) => {
     uploadZone.classList.add('drag-over');
 });
 
+uploadZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+});
+
+uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+        handleFiles(e.dataTransfer.files);
+    }
+});
+
+// =========================================
 // Recording Handling
+// =========================================
 btnRecord.addEventListener('click', (e) => {
-    e.stopPropagation(); // Don't trigger file input click
-    
+    e.stopPropagation();
+
     if (!window.MediaRecorder) {
         showToast('Seu navegador não suporta gravação de áudio.', 'error');
         return;
     }
-    
+
     toggleRecording();
 });
 
@@ -102,9 +116,9 @@ async function startRecording() {
             const now = new Date();
             const fileNameStr = `gravacao_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.webm`;
             const file = new File([audioBlob], fileNameStr, { type: 'audio/webm' });
-            
-            handleFile(file);
-            
+
+            addFile(file);
+
             // Auto-start transcription
             setTimeout(() => {
                 startTranscription();
@@ -116,9 +130,9 @@ async function startRecording() {
         btnRecord.classList.add('recording');
         btnRecord.querySelector('.record-label').textContent = 'Parar Gravação';
         recordingTimer.classList.remove('hidden');
-        
-        recordingInterval = setInterval(updateTimer, 100);
-        
+
+        recordingInterval = setInterval(updateRecordingTimer, 100);
+
         showToast('Gravando áudio...', 'success');
     } catch (err) {
         console.error('Error accessing microphone:', err);
@@ -130,7 +144,7 @@ function stopRecording() {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop();
         mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        
+
         clearInterval(recordingInterval);
         btnRecord.classList.remove('recording');
         btnRecord.querySelector('.record-label').textContent = 'Gravar Áudio';
@@ -139,7 +153,7 @@ function stopRecording() {
     }
 }
 
-function updateTimer() {
+function updateRecordingTimer() {
     const elapsed = Date.now() - startTime;
     recordingTimer.textContent = formatTime(elapsed);
 }
@@ -151,70 +165,113 @@ function formatTime(ms) {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-uploadZone.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('drag-over');
-});
+// =========================================
+// Multiple File Handling
+// =========================================
 
-uploadZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('drag-over');
-    if (e.dataTransfer.files.length > 0) {
-        handleFile(e.dataTransfer.files[0]);
-    }
-});
+const validTypes = [
+    'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/mp4',
+    'audio/aac', 'audio/x-m4a', 'audio/flac',
+    'video/mp4', 'video/webm', 'video/ogg', 'video/x-matroska'
+];
+const validExts = ['mp3', 'wav', 'ogg', 'webm', 'm4a', 'aac', 'flac', 'mp4', 'mkv', 'avi'];
 
-function handleFile(file) {
-    const validTypes = [
-        'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/mp4',
-        'audio/aac', 'audio/x-m4a', 'audio/flac',
-        'video/mp4', 'video/webm', 'video/ogg', 'video/x-matroska'
-    ];
-
+function isValidFile(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    const validExts = ['mp3', 'wav', 'ogg', 'webm', 'm4a', 'aac', 'flac', 'mp4', 'mkv', 'avi'];
+    return validTypes.includes(file.type) || validExts.includes(ext);
+}
 
-    if (!validTypes.includes(file.type) && !validExts.includes(ext)) {
-        showToast('Formato não suportado. Use áudio ou vídeo.', 'error');
-        return;
+function handleFiles(fileList) {
+    let added = 0;
+    for (const file of fileList) {
+        if (isValidFile(file)) {
+            addFile(file);
+            added++;
+        }
     }
+    if (added === 0) {
+        showToast('Nenhum formato suportado. Use áudio ou vídeo.', 'error');
+    }
+}
 
-    currentFile = file;
-
-    // Update UI
-    fileName.textContent = file.name;
-    fileSize.textContent = formatFileSize(file.size);
-
-    // Update icon based on type
-    const isVideo = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi', 'webm'].includes(ext);
-    fileIcon.innerHTML = isVideo
-        ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 6 4-6 4Z"/>
-           </svg>`
-        : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-           </svg>`;
-
+function addFile(file) {
+    const id = ++fileIdCounter;
+    currentFiles.push({ id, file });
+    renderFilesList();
     uploadSection.classList.add('hidden');
     fileInfoSection.classList.remove('hidden');
 }
 
-// Remove file
-btnRemove.addEventListener('click', () => {
-    currentFile = null;
+function removeFile(id) {
+    currentFiles = currentFiles.filter(f => f.id !== id);
+    if (currentFiles.length === 0) {
+        fileInfoSection.classList.add('hidden');
+        uploadSection.classList.remove('hidden');
+        fileInput.value = '';
+    } else {
+        renderFilesList();
+    }
+}
+
+function renderFilesList() {
+    // Update count
+    const count = currentFiles.length;
+    filesCount.textContent = count === 1
+        ? '1 arquivo selecionado'
+        : `${count} arquivos selecionados`;
+
+    // Render file items
+    filesList.innerHTML = currentFiles.map(({ id, file }) => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const isVideo = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi'].includes(ext);
+        const icon = isVideo
+            ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 6 4-6 4Z"/></svg>`
+            : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+
+        return `
+            <div class="file-item" data-id="${id}">
+                <div class="file-item-left">
+                    <div class="file-item-icon">${icon}</div>
+                    <div class="file-item-details">
+                        <span class="file-item-name">${escapeHtml(file.name)}</span>
+                        <span class="file-item-size">${formatFileSize(file.size)}</span>
+                    </div>
+                </div>
+                <button class="btn-remove-file" data-id="${id}" title="Remover">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" x2="6" y1="6" y2="18"/>
+                        <line x1="6" x2="18" y1="6" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    // Add remove event listeners
+    filesList.querySelectorAll('.btn-remove-file').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.getAttribute('data-id'));
+            removeFile(id);
+        });
+    });
+}
+
+// Clear all files
+btnClearAll.addEventListener('click', () => {
+    currentFiles = [];
     fileInput.value = '';
     fileInfoSection.classList.add('hidden');
     uploadSection.classList.remove('hidden');
 });
 
 // =========================================
-// Transcription Process
+// Transcription Process (Multiple Files)
 // =========================================
 
 btnTranscribe.addEventListener('click', startTranscription);
 
 async function startTranscription() {
-    if (!currentFile) return;
+    if (currentFiles.length === 0) return;
 
     btnTranscribe.disabled = true;
     progressSection.classList.remove('hidden');
@@ -222,17 +279,16 @@ async function startTranscription() {
     fileInfoSection.querySelector('.settings-row').style.pointerEvents = 'none';
     btnTranscribe.style.display = 'none';
 
-    try {
-        // Step 1: Load audio
-        updateProgress('Processando áudio...', 'Extraindo dados do arquivo', 10);
-        const audioData = await loadAudioData(currentFile);
+    transcriptionResults = [];
+    const totalFiles = currentFiles.length;
 
-        // Step 2: Load model
+    try {
+        // Step 1: Load model (once for all files)
         const selectedModel = modelSelect.value;
         const selectedLang = languageSelect.value;
         const lang = selectedLang === 'null' ? null : selectedLang;
 
-        updateProgress('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 20);
+        updateProgress('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
 
         if (!transcriber || transcriber._modelId !== selectedModel) {
             transcriber = await pipeline(
@@ -247,10 +303,10 @@ async function startTranscription() {
                             updateProgress(
                                 'Baixando modelo de IA...',
                                 `${progress.file || ''} — ${pct}%`,
-                                20 + (pct * 0.4)
+                                5 + (pct * 0.25)
                             );
                         } else if (progress.status === 'ready') {
-                            updateProgress('Modelo carregado!', 'Iniciando transcrição...', 65);
+                            updateProgress('Modelo carregado!', 'Iniciando transcrições...', 35);
                         }
                     }
                 }
@@ -258,30 +314,62 @@ async function startTranscription() {
             transcriber._modelId = selectedModel;
         }
 
-        // Step 3: Transcribe
-        updateProgress('Transcrevendo...', 'A IA está processando o áudio', 70);
-
-        const options = {
+        // Step 2: Transcribe each file
+        const transcriptionOptions = {
             chunk_length_s: 30,
             stride_length_s: 5,
             return_timestamps: true,
         };
-
         if (lang) {
-            options.language = lang;
+            transcriptionOptions.language = lang;
         }
 
-        const result = await transcriber(audioData, options);
+        for (let i = 0; i < totalFiles; i++) {
+            const { file } = currentFiles[i];
+            const fileNum = i + 1;
+            const baseProgress = 35 + ((i / totalFiles) * 55);
+            const fileProgress = 55 / totalFiles;
 
-        updateProgress('Finalizando...', 'Formatando resultado', 95);
+            updateProgress(
+                `Transcrevendo arquivo ${fileNum} de ${totalFiles}...`,
+                file.name,
+                baseProgress
+            );
 
-        // Step 4: Display results
-        transcriptionChunks = result.chunks || [];
-        const fullText = result.text || '';
+            // Load audio
+            updateProgress(
+                `Processando áudio ${fileNum}/${totalFiles}...`,
+                file.name,
+                baseProgress + (fileProgress * 0.2)
+            );
+            const audioData = await loadAudioData(file);
 
-        displayResults(fullText, transcriptionChunks);
+            // Transcribe
+            updateProgress(
+                `Transcrevendo ${fileNum}/${totalFiles}...`,
+                file.name,
+                baseProgress + (fileProgress * 0.4)
+            );
+            const result = await transcriber(audioData, transcriptionOptions);
 
-        updateProgress('Concluído!', '', 100);
+            transcriptionResults.push({
+                fileName: file.name,
+                text: result.text || '',
+                chunks: result.chunks || []
+            });
+
+            updateProgress(
+                `Concluído ${fileNum}/${totalFiles}`,
+                file.name,
+                baseProgress + fileProgress
+            );
+        }
+
+        // Step 3: Display all results
+        updateProgress('Finalizando...', 'Formatando resultados', 95);
+        displayAllResults();
+
+        updateProgress('Concluído!', `${totalFiles} arquivo${totalFiles > 1 ? 's' : ''} transcrito${totalFiles > 1 ? 's' : ''}`, 100);
 
         setTimeout(() => {
             progressSection.classList.add('hidden');
@@ -313,10 +401,8 @@ async function loadAudioData(file) {
 
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-    // Get mono audio data at 16kHz
     let audioData;
     if (audioBuffer.numberOfChannels > 1) {
-        // Mix to mono
         const channel0 = audioBuffer.getChannelData(0);
         const channel1 = audioBuffer.getChannelData(1);
         audioData = new Float32Array(channel0.length);
@@ -332,92 +418,179 @@ async function loadAudioData(file) {
 }
 
 // =========================================
-// Display Results
+// Display Results (Multiple Cards)
 // =========================================
 
-function displayResults(fullText, chunks) {
-    // Stats
-    const wordCount = fullText.trim().split(/\s+/).filter(w => w.length > 0).length;
-    const charCount = fullText.length;
-    const duration = chunks.length > 0
-        ? chunks[chunks.length - 1].timestamp[1] || 0
-        : 0;
+function displayAllResults() {
+    resultsContainer.innerHTML = transcriptionResults.map((result, index) => {
+        const { fileName, text, chunks } = result;
+        const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+        const charCount = text.length;
+        const duration = chunks.length > 0
+            ? chunks[chunks.length - 1].timestamp[1] || 0
+            : 0;
 
-    resultStats.innerHTML = `
-        <span class="stat-item">Palavras: <span class="stat-value">${wordCount}</span></span>
-        <span class="stat-item">Caracteres: <span class="stat-value">${charCount}</span></span>
-        ${duration > 0 ? `<span class="stat-item">Duração: <span class="stat-value">${formatDuration(duration)}</span></span>` : ''}
-    `;
+        const contentHtml = chunks.length > 0
+            ? chunks.map(chunk => {
+                const start = formatTimestamp(chunk.timestamp[0]);
+                const end = formatTimestamp(chunk.timestamp[1]);
+                return `<div class="chunk"><span class="timestamp">${start} → ${end}</span><span>${escapeHtml(chunk.text.trim())}</span></div>`;
+            }).join('')
+            : `<p>${escapeHtml(text)}</p>`;
 
-    // Content
-    if (chunks.length > 0) {
-        resultContent.innerHTML = chunks.map((chunk, i) => {
-            const startTime = formatTimestamp(chunk.timestamp[0]);
-            const endTime = formatTimestamp(chunk.timestamp[1]);
-            return `
-                <div class="chunk">
-                    <span class="timestamp">${startTime} → ${endTime}</span>
-                    <span>${escapeHtml(chunk.text.trim())}</span>
+        return `
+            <div class="result-card" data-index="${index}">
+                <div class="result-card-header" data-index="${index}">
+                    <div class="result-card-title">
+                        <span class="result-card-number">${index + 1}</span>
+                        <div class="result-card-file-info">
+                            <span class="result-card-name">${escapeHtml(fileName)}</span>
+                            <div class="result-card-stats">
+                                <span>${wordCount} palavras</span>
+                                <span>•</span>
+                                <span>${charCount} caracteres</span>
+                                ${duration > 0 ? `<span>•</span><span>${formatDuration(duration)}</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="result-card-actions">
+                        <button class="btn-card-action btn-copy-single" data-index="${index}" title="Copiar">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+                                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                            </svg>
+                        </button>
+                        <button class="btn-card-action btn-download-txt" data-index="${index}" title="Baixar .txt">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" x2="12" y1="15" y2="3"/>
+                            </svg>
+                        </button>
+                        <button class="btn-card-action btn-download-srt" data-index="${index}" title="Baixar .srt">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M7 8h10M7 12h10M7 16h6"/>
+                            </svg>
+                        </button>
+                        <button class="btn-card-toggle" data-index="${index}" title="Expandir/Recolher">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
-            `;
-        }).join('');
-    } else {
-        resultContent.innerHTML = `<p>${escapeHtml(fullText)}</p>`;
-    }
+                <div class="result-card-content open" data-index="${index}">
+                    ${contentHtml}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Add event listeners for card actions
+    addCardEventListeners();
+}
+
+function addCardEventListeners() {
+    // Copy single
+    resultsContainer.querySelectorAll('.btn-copy-single').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.getAttribute('data-index'));
+            const text = getPlainTextForResult(index);
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Texto copiado!', 'success');
+            });
+        });
+    });
+
+    // Download TXT single
+    resultsContainer.querySelectorAll('.btn-download-txt').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.getAttribute('data-index'));
+            const result = transcriptionResults[index];
+            const text = getPlainTextForResult(index);
+            const baseName = result.fileName.replace(/\.[^.]+$/, '');
+            downloadFile(`${baseName}_transcricao.txt`, text, 'text/plain');
+            showToast('Arquivo TXT baixado!', 'success');
+        });
+    });
+
+    // Download SRT single
+    resultsContainer.querySelectorAll('.btn-download-srt').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.getAttribute('data-index'));
+            const result = transcriptionResults[index];
+            const srt = generateSRTForResult(index);
+            const baseName = result.fileName.replace(/\.[^.]+$/, '');
+            downloadFile(`${baseName}_legenda.srt`, srt, 'text/srt');
+            showToast('Arquivo SRT baixado!', 'success');
+        });
+    });
+
+    // Toggle card content
+    resultsContainer.querySelectorAll('.btn-card-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = btn.getAttribute('data-index');
+            const content = resultsContainer.querySelector(`.result-card-content[data-index="${index}"]`);
+            const icon = btn.querySelector('svg');
+            content.classList.toggle('open');
+            if (content.classList.contains('open')) {
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                icon.style.transform = 'rotate(-90deg)';
+            }
+        });
+    });
+
+    // Click header to toggle
+    resultsContainer.querySelectorAll('.result-card-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const index = header.getAttribute('data-index');
+            const toggleBtn = header.querySelector('.btn-card-toggle');
+            toggleBtn.click();
+        });
+    });
 }
 
 // =========================================
-// Result Actions
+// Result Actions (All)
 // =========================================
 
-// Copy
-btnCopy.addEventListener('click', () => {
-    const text = getPlainText();
-    navigator.clipboard.writeText(text).then(() => {
-        btnCopy.classList.add('copied');
-        btnCopy.innerHTML = `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            Copiado!
-        `;
-        showToast('Texto copiado!', 'success');
-        setTimeout(() => {
-            btnCopy.classList.remove('copied');
-            btnCopy.innerHTML = `
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-                </svg>
-                Copiar
-            `;
-        }, 2000);
+// Copy all
+btnCopyAll.addEventListener('click', () => {
+    const allText = transcriptionResults.map((r, i) => {
+        const header = `=== ${r.fileName} ===`;
+        const text = getPlainTextForResult(i);
+        return `${header}\n${text}`;
+    }).join('\n\n');
+
+    navigator.clipboard.writeText(allText).then(() => {
+        showToast('Todas as transcrições copiadas!', 'success');
     });
 });
 
-// Download TXT
-btnDownload.addEventListener('click', () => {
-    const text = getPlainText();
-    const baseName = currentFile ? currentFile.name.replace(/\.[^.]+$/, '') : 'transcricao';
-    downloadFile(`${baseName}_transcricao.txt`, text, 'text/plain');
-    showToast('Arquivo TXT baixado!', 'success');
-});
+// Download all as single TXT
+btnDownloadAll.addEventListener('click', () => {
+    const allText = transcriptionResults.map((r, i) => {
+        const header = `=== ${r.fileName} ===`;
+        const text = getPlainTextForResult(i);
+        return `${header}\n${text}`;
+    }).join('\n\n');
 
-// Download SRT
-btnDownloadSrt.addEventListener('click', () => {
-    const srt = generateSRT();
-    const baseName = currentFile ? currentFile.name.replace(/\.[^.]+$/, '') : 'transcricao';
-    downloadFile(`${baseName}_legenda.srt`, srt, 'text/srt');
-    showToast('Arquivo SRT baixado!', 'success');
+    downloadFile('todas_transcricoes.txt', allText, 'text/plain');
+    showToast('Arquivo TXT com todas as transcrições baixado!', 'success');
 });
 
 // New transcription
 btnNew.addEventListener('click', () => {
     resultSection.classList.add('hidden');
     uploadSection.classList.remove('hidden');
-    currentFile = null;
+    currentFiles = [];
     fileInput.value = '';
-    transcriptionChunks = [];
+    transcriptionResults = [];
     btnTranscribe.style.display = 'flex';
     btnTranscribe.disabled = false;
     const settingsRow = fileInfoSection.querySelector('.settings-row');
@@ -431,21 +604,23 @@ btnNew.addEventListener('click', () => {
 // Helper Functions
 // =========================================
 
-function getPlainText() {
-    if (transcriptionChunks.length > 0) {
-        return transcriptionChunks.map(c => {
+function getPlainTextForResult(index) {
+    const result = transcriptionResults[index];
+    if (result.chunks.length > 0) {
+        return result.chunks.map(c => {
             const start = formatTimestamp(c.timestamp[0]);
             const end = formatTimestamp(c.timestamp[1]);
             return `[${start} → ${end}] ${c.text.trim()}`;
         }).join('\n');
     }
-    return resultContent.textContent || '';
+    return result.text || '';
 }
 
-function generateSRT() {
-    if (transcriptionChunks.length === 0) return getPlainText();
+function generateSRTForResult(index) {
+    const result = transcriptionResults[index];
+    if (result.chunks.length === 0) return result.text || '';
 
-    return transcriptionChunks.map((chunk, i) => {
+    return result.chunks.map((chunk, i) => {
         const startSrt = formatSRTTimestamp(chunk.timestamp[0]);
         const endSrt = formatSRTTimestamp(chunk.timestamp[1]);
         return `${i + 1}\n${startSrt} --> ${endSrt}\n${chunk.text.trim()}\n`;
