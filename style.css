@@ -254,45 +254,98 @@ body::before {
 }
 
 /* =========================================
+   Divider "ou"
+   ========================================= */
+
+.divider-or {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.divider-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+.divider-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+/* =========================================
    Recording Button
    ========================================= */
 
 .record-container {
-    margin: 20px 0 24px;
     display: flex;
     justify-content: center;
-    z-index: 10;
 }
 
 .btn-record {
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 100px;
-    padding: 10px 24px;
+    border-radius: var(--radius-xl);
+    padding: 16px 32px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     cursor: pointer;
     transition: var(--transition);
     color: var(--text-primary);
     position: relative;
-    overflow: visible;
+    overflow: hidden;
+    width: 100%;
+    justify-content: center;
+}
+
+.btn-record::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-xl);
+    padding: 1px;
+    background: linear-gradient(135deg, var(--accent), #c084fc, var(--accent));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 0.4s ease;
 }
 
 .btn-record:hover {
     border-color: var(--accent);
-    background: var(--bg-hover);
-    transform: scale(1.05);
-    box-shadow: 0 0 20px rgba(124, 92, 252, 0.15);
+    background: var(--bg-tertiary);
+    transform: translateY(-2px);
+    box-shadow: 0 0 30px rgba(124, 92, 252, 0.15), 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.btn-record:hover::before {
+    opacity: 1;
+}
+
+.btn-record:hover .mic-icon {
+    color: var(--accent);
+    filter: drop-shadow(0 0 6px rgba(124, 92, 252, 0.4));
 }
 
 .record-icon-wrapper {
     position: relative;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.mic-icon {
+    transition: var(--transition);
+    color: var(--text-secondary);
 }
 
 .recording-pulse {
@@ -306,14 +359,20 @@ body::before {
 }
 
 .btn-record.recording {
-    background: rgba(248, 113, 113, 0.1);
+    background: rgba(248, 113, 113, 0.08);
     border-color: var(--error);
     animation: recording-glow 1.5s ease-in-out infinite alternate;
+}
+
+.btn-record.recording::before {
+    background: linear-gradient(135deg, var(--error), #fca5a5, var(--error));
+    opacity: 1;
 }
 
 .btn-record.recording .mic-icon {
     color: var(--error);
     animation: mic-shake 0.3s ease-in-out infinite alternate;
+    filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.5));
 }
 
 .btn-record.recording .recording-pulse {
@@ -322,22 +381,26 @@ body::before {
 }
 
 .record-label {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
     transition: var(--transition);
+    font-family: 'Inter', sans-serif;
 }
 
 .recording-timer {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: var(--error);
     font-variant-numeric: tabular-nums;
     margin-left: 4px;
+    padding: 2px 10px;
+    background: rgba(248, 113, 113, 0.1);
+    border-radius: 100px;
 }
 
 @keyframes recording-glow {
     from { box-shadow: 0 0 0px rgba(248, 113, 113, 0); }
-    to { box-shadow: 0 0 25px rgba(248, 113, 113, 0.25); }
+    to { box-shadow: 0 0 30px rgba(248, 113, 113, 0.2), 0 0 60px rgba(248, 113, 113, 0.08); }
 }
 
 @keyframes recording-wave {

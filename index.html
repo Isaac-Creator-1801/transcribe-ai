@@ -48,22 +48,6 @@
                 </div>
                 <h3 class="upload-title">Arraste seu arquivo aqui</h3>
                 <p class="upload-text">ou clique para selecionar</p>
-                
-                <div class="record-container">
-                    <button type="button" class="btn-record" id="btn-record" title="Gravar Áudio">
-                        <div class="record-icon-wrapper">
-                            <svg class="mic-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                                <line x1="12" x2="12" y1="19" y2="22"/>
-                            </svg>
-                            <div class="recording-pulse"></div>
-                        </div>
-                        <span class="record-label">Gravar Áudio</span>
-                        <div class="recording-timer hidden" id="recording-timer">00:00</div>
-                    </button>
-                </div>
-
                 <div class="upload-formats">
                     <span class="format-tag">MP3</span>
                     <span class="format-tag">WAV</span>
@@ -74,6 +58,27 @@
                     <span class="format-tag">AAC</span>
                 </div>
                 <input type="file" id="file-input" accept="audio/*,video/*,.mp3,.wav,.ogg,.m4a,.aac,.mp4,.webm,.mkv" hidden>
+            </div>
+
+            <div class="divider-or">
+                <span class="divider-line"></span>
+                <span class="divider-text">ou</span>
+                <span class="divider-line"></span>
+            </div>
+
+            <div class="record-container">
+                <button type="button" class="btn-record" id="btn-record" title="Gravar Áudio">
+                    <div class="record-icon-wrapper">
+                        <svg class="mic-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" x2="12" y1="19" y2="22"/>
+                        </svg>
+                        <div class="recording-pulse"></div>
+                    </div>
+                    <span class="record-label">Gravar Áudio</span>
+                    <div class="recording-timer hidden" id="recording-timer">00:00</div>
+                </button>
             </div>
         </section>
 
