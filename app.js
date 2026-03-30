@@ -161,18 +161,20 @@ async function toggleRecording() {
 
 async function startRecording() {
     try {
-        // Solicita áudio com tratamento de redução de ruído, eco e ganho automático
+        // Solicita áudio com os melhores parâmetros de 'Studio' possíveis para Web
         const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                sampleRate: 44100 // Captura com qualidade de CD antes do downsample
+                echoCancellation: true,      // Evita eco
+                noiseSuppression: true,      // Limpa estática do microfone
+                autoGainControl: true,       // Niveliza a voz
+                channelCount: 1,             // Mono (Otimizado para o modelo de Inteligência Artificial)
+                sampleRate: 48000,           // 48kHz (Padrão de estúdio e vídeo de alta qualidade)
+                sampleSize: 16               // 16-bit de profundidade
             } 
         });
         
-        // Tenta usar um codec de alta qualidade (Opus)
-        const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
+        // Força uma gravação de altíssima taxa de bits (256kbps) se o navegador aguentar
+        const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 256000 };
         const mimeType = MediaRecorder.isTypeSupported(options.mimeType) ? options : { mimeType: 'audio/webm' };
         
         mediaRecorder = new MediaRecorder(stream, mimeType);
