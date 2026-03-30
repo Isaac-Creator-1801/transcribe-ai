@@ -161,8 +161,21 @@ async function toggleRecording() {
 
 async function startRecording() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
+        // Solicita áudio com tratamento de redução de ruído, eco e ganho automático
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 44100 // Captura com qualidade de CD antes do downsample
+            } 
+        });
+        
+        // Tenta usar um codec de alta qualidade (Opus)
+        const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
+        const mimeType = MediaRecorder.isTypeSupported(options.mimeType) ? options : { mimeType: 'audio/webm' };
+        
+        mediaRecorder = new MediaRecorder(stream, mimeType);
         audioChunks = [];
 
         mediaRecorder.ondataavailable = (event) => {
