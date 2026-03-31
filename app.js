@@ -160,41 +160,64 @@ if (btnYoutubeFetch) {
         youtubeStatus.textContent = '⏳ Puxando áudio da nuvem... Isso pode demorar uns instantes.';
         
         try {
-            // Plano A: Sua própria nuvem na Vercel (Agora com link absoluto para funcionar no GitHub)
-            // Se estivermos na Vercel, usamos o caminho relativo, senão o absoluto.
+            // ---- PLANO A: Sua Nuvem Vercel (Privado e Rápido) ----
             const vercelBase = window.location.hostname.includes('vercel.app') ? '' : 'https://transcribe-ai-alpha.vercel.app';
             const vercelUrl = `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`;
             
-            console.log('Tentando Plano A (Vercel):', vercelUrl);
-            let response = await fetch(vercelUrl);
+            console.log('Tentando PLANO A (Vercel):', vercelUrl);
+            youtubeStatus.textContent = '⏳ PLANO A: Puxando da sua nuvem...';
             
-            // Se a Vercel falhar ou estiver bloqueada pelo YouTube (Erro 500)
-            if (!response.ok) {
-                console.warn('Plano A falhou (Vercel bloqueada?). Tentando Plano B (Servidor Público Piped)...');
-                youtubeStatus.textContent = '⏳ Plano A falhou. Tentando Plano B (Servidor Público)...';
+            let response;
+            try {
+                response = await fetch(vercelUrl);
+            } catch (e) {
+                console.error('Falha de rede/CORS no Plano A:', e);
+            }
+            
+            // ---- SE O PLANO A FALHAR (OU DER ERRO 500) ----
+            if (!response || !response.ok) {
+                console.warn('PLANO A falhou. Tentando PLANO B (Servidor Público Piped)...');
+                youtubeStatus.textContent = '⏳ PLANO B: Mudando para servidor público...';
                 
-                // Plano B: Piped API (Servidore públicos de Invidious que costumam burlar bloqueios)
-                // Tentamos pegar o ID do vídeo
                 const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
                 const videoId = videoIdMatch ? videoIdMatch[1] : null;
                 
-                if (videoId) {
-                    // Instância pública estável do Piped
+                if (!videoId) throw new Error('Link do YouTube inválido.');
+
+                // Tentativa B: Piped API Direta
+                try {
                     const pipedRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`);
                     const pipedData = await pipedRes.json();
-                    
                     if (pipedData && pipedData.audioStreams && pipedData.audioStreams.length > 0) {
-                        // Pegamos o primeiro stream de áudio disponível
-                        const audioUrl = pipedData.audioStreams[0].url;
-                        response = await fetch(audioUrl); // Busca o áudio real
-                        if (!response.ok) throw new Error('Falha total em todos os servidores.');
-                    } else {
-                        throw new Error('Nenhum servidor conseguiu extrair o áudio desse vídeo.');
+                        response = await fetch(pipedData.audioStreams[0].url);
                     }
-                } else {
-                    throw new Error('Link do YouTube inválido.');
+                } catch (e) {
+                    console.error('Falha no Plano B:', e);
                 }
             }
+
+            // ---- PLANO C: Proxy de Emergência (Para pular bloqueios do navegador) ----
+            if (!response || !response.ok) {
+                console.warn('PLANO B falhou. Tentando PLANO C (Túnel de Emergência)...');
+                youtubeStatus.textContent = '⏳ PLANO C: Ativando túnel de emergência...';
+                
+                const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
+                const videoId = videoIdMatch ? videoIdMatch[1] : null;
+                
+                // Usamos o AllOrigins para buscar o link do áudio quando o navegador bloqueia o acesso direto
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://pipedapi.kavin.rocks/streams/${videoId}`)}`;
+                const proxyRes = await fetch(proxyUrl);
+                const proxyJson = await proxyRes.json();
+                const pipedData = JSON.parse(proxyJson.contents);
+                
+                if (pipedData && pipedData.audioStreams && pipedData.audioStreams.length > 0) {
+                    response = await fetch(pipedData.audioStreams[0].url);
+                } else {
+                    throw new Error('Todos os servidores de download estão ocupados.');
+                }
+            }
+
+            if (!response || !response.ok) throw new Error('Não foi possível obter o arquivo de áudio.');
             
             const contentDisposition = response.headers.get('Content-Disposition');
             let filename = 'youtube_audio.webm';
@@ -208,18 +231,17 @@ if (btnYoutubeFetch) {
             
             youtubeUrlInput.value = '';
             addFile(file);
-            showToast('Áudio do YouTube adicionado!', 'success');
+            showToast('Sucesso! Áudio carregado.', 'success');
         } catch (error) {
-            console.error('YouTube Fetch Error:', error);
-            showToast(`Aviso: ${error.message}`, 'error');
+            console.error('YouTube Final Error:', error);
+            showToast(`Erro Crítico: ${error.message}`, 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = `❌ ERRO: Todos os servidores falharam. Tente novamente mais tarde.`;
+            youtubeStatus.textContent = `❌ FALHA GERAL: Tente um arquivo local. (${error.message})`;
             
             setTimeout(() => {
                 youtubeStatus.style.display = 'none';
-                youtubeStatus.style.color = 'var(--text-secondary)';
-            }, 8000);
+            }, 10000);
         } finally {
             btnYoutubeFetch.disabled = false;
             btnYoutubeFetch.style.opacity = '1';

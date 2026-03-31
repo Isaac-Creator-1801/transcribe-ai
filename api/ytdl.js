@@ -2,67 +2,62 @@ const { Innertube, UniversalCache } = require('youtubei.js');
 const { Readable } = require('stream');
 
 module.exports = async function handler(req, res) {
-    // Configurações de CORS para a Vercel
-    res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Super-CORS: Libera tudo mesmo!
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Origin', '*'); 
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400'); // Cache do CORS por 24h
 
+    // Responde ao pré-check do navegador (OPTIONS)
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
 
     try {
-        const url = req.query.url;
-        if (!url) {
-            return res.status(400).json({ error: 'Faltando o URL no link.' });
-        }
+        const { url } = req.query;
+        if (!url) return res.status(400).json({ error: 'Link ausente.' });
 
-        console.log('Iniciando Innertube para URL:', url);
+        console.log('Fábrica de Áudio Iniciando...');
+        
+        // Versão mais leve p/ Vercel sem cache pesado
         const yt = await Innertube.create({ 
             cache: new UniversalCache(false),
-            generate_session_locally: true 
+            generate_session_locally: true
         });
         
-        let videoId = url;
         const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-        if (videoIdMatch) {
-            videoId = videoIdMatch[1];
-        }
+        const videoId = videoIdMatch ? videoIdMatch[1] : url;
 
-        console.log('Extraindo informações do Video ID:', videoId);
+        console.log('Capturando info do vídeo:', videoId);
         const info = await yt.getInfo(videoId);
-
+        
         if (!info || !info.basic_info) {
-            throw new Error('Não foi possível obter informações do vídeo do YouTube.');
+            throw new Error('Vídeo não encontrado ou bloqueado pelo YouTube.');
         }
 
-        // Prepara para enviar o áudio
-        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(info.basic_info.title)}.webm"`);
+        // Headers para download direto
+        const filename = encodeURIComponent(info.basic_info.title || 'audio');
         res.setHeader('Content-Type', 'audio/webm');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}.webm"`);
 
-        console.log('Iniciando o download do áudio...');
+        // Extrai o áudio
         const stream = await yt.download(videoId, {
             type: 'audio',
             quality: 'best',
             format: 'webm'
         });
 
-        // Transforma o fluxo web para o formato do Node 18+ (compatível com a Vercel)
-        // Isso garante que o áudio seja enviado por "pedaços" (streaming) sem travar
+        // Envia o áudio em pedaços (streaming)
         Readable.fromWeb(stream).pipe(res);
 
-        res.on('finish', () => console.log('Download concluído com sucesso!'));
-        res.on('error', (err) => console.error('Encontrei esse problema no meio do download:', err));
-
     } catch (error) {
-        console.error('ERRO CRITICO NA VERCEL:', error);
-        // Retorna o erro real para podermos ler no frontend em caso de bloqueio do YouTube
+        console.error('Falha na Nuvem:', error);
         if (!res.headersSent) {
             res.status(500).json({ 
-                error: `Ops! A nuvem deu erro: ${error.message || 'Erro Desconhecido'}`,
-                code: error.code || 'API_FAIL'
+                error: error.message || 'Erro Desconhecido',
+                code: 'CLOUD_X' 
             });
         }
     }
