@@ -257,6 +257,14 @@
                             <option value="low">Baixa (128 kbps)</option>
                         </select>
                     </div>
+                    <!-- New PDF Settings -->
+                    <div class="setting-group hidden" id="pdf-page-settings">
+                        <label class="setting-label">Páginas do PDF</label>
+                        <select class="setting-select" id="pdf-render-mode">
+                            <option value="first">Apenas Primeira Página</option>
+                            <option value="all">Todas as Páginas (ZIP)</option>
+                        </select>
+                    </div>
                 </div>
 
                 <!-- File Info for Converter -->
@@ -340,5 +348,7 @@
     </div>
 
     <script type="module" src="app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </body>
 </html>

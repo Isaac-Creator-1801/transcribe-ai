@@ -57,6 +57,8 @@ const converterBtnDownloadAll = document.getElementById('converter-btn-download-
 const converterBtnNew = document.getElementById('converter-btn-new');
 const conversionDirection = document.getElementById('conversion-direction');
 const inputCategoryBadge = document.getElementById('input-category-badge');
+const pdfPageSettings = document.getElementById('pdf-page-settings');
+const pdfRenderMode = document.getElementById('pdf-render-mode');
 
 // =========================================
 // State
@@ -93,7 +95,7 @@ const CONVERSION_MAP = {
     },
     'document': {
         icon: '📄',
-        outputs: ['pdf', 'docx', 'txt', 'html']
+        outputs: ['pdf', 'docx', 'txt', 'html', 'png', 'jpg']
     },
     'archive': {
         icon: '📦',
@@ -681,6 +683,21 @@ function updateOutputFormats(category) {
     } else {
         converterQualitySelect.parentElement.classList.add('hidden');
     }
+
+    // PDF page settings visibility
+    const isPDF = converterFiles.length > 0 && converterFiles[0].file.name.toLowerCase().endsWith('.pdf');
+    if (category === 'document' && isPDF && ['png', 'jpg'].includes(converterOutputFormat.value)) {
+        pdfPageSettings.classList.remove('hidden');
+    } else {
+        pdfPageSettings.classList.add('hidden');
+    }
+}
+
+// Add event listener to update visibility when output format changes
+if (converterOutputFormat) {
+    converterOutputFormat.addEventListener('change', () => {
+        if (converterFiles.length > 0) updateOutputFormats(converterFiles[0].category);
+    });
 }
 
 function removeConverterFile(id) {
@@ -780,10 +797,67 @@ async function startConversion() {
     }
 }
 
+async function renderPdfToImages(file, format, mode) {
+    const arrayBuffer = await file.arrayBuffer();
+    
+    // Configure pdf.js worker
+    if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    } else {
+        throw new Error('Biblioteca PDF.js não carregada corretamente.');
+    }
+
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = mode === 'all' ? pdf.numPages : 1;
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    
+    let mimeType = `image/${format}`;
+    if (format === 'jpg') mimeType = 'image/jpeg';
+
+    if (numPages === 1) {
+        const page = await pdf.getPage(1);
+        const canvas = document.createElement('canvas');
+        const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for quality
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
+        return { originalName: file.name, convertedName: `${baseName}.${format}`, blob, mimeType };
+    } else {
+        // Multi-page conversion to ZIP
+        if (typeof JSZip === 'undefined') throw new Error('JSZip não carregado.');
+        const zip = new JSZip();
+        
+        for (let i = 1; i <= numPages; i++) {
+            const page = await pdf.getPage(i);
+            const canvas = document.createElement('canvas');
+            const viewport = page.getViewport({ scale: 2.0 });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
+            zip.file(`${baseName}_pg${i}.${format}`, blob);
+            updateConverterProgress(`Processando página ${i}/${numPages}...`, file.name, 10 + (i / numPages) * 80);
+        }
+        
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        return { originalName: file.name, convertedName: `${baseName}_imagens.zip`, blob: zipBlob, mimeType: 'application/zip' };
+    }
+}
+
 async function convertFile(file, format) {
     const category = getFileCategory(file);
     const baseName = file.name.replace(/\.[^.]+$/, '');
     const newName = `${baseName}.${format}`;
+
+    // Handle DOCUMENTS (PDF to Image)
+    if (category === 'document' && file.name.toLowerCase().endsWith('.pdf') && ['png', 'jpg'].includes(format)) {
+        return renderPdfToImages(file, format, pdfRenderMode.value);
+    }
 
     // Handle IMAGES (using Canvas)
     if (category === 'image') {
