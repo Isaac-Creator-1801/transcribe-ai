@@ -845,16 +845,19 @@ async function renderPdfToImages(file, format, mode) {
     let mimeType = `image/${format}`;
     if (format === 'jpg') mimeType = 'image/jpeg';
 
+    // Reduced scale for better performance
+    const scale = window.devicePixelRatio > 1 ? 1.5 : 1.0;
+
     if (numPages === 1) {
         const page = await pdf.getPage(1);
         const canvas = document.createElement('canvas');
-        const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for quality
+        const viewport = page.getViewport({ scale: scale });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
         
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.85));
         return { originalName: file.name, convertedName: `${baseName}.${format}`, blob, mimeType };
     } else {
         // Multi-page conversion to ZIP
@@ -864,13 +867,13 @@ async function renderPdfToImages(file, format, mode) {
         for (let i = 1; i <= numPages; i++) {
             const page = await pdf.getPage(i);
             const canvas = document.createElement('canvas');
-            const viewport = page.getViewport({ scale: 2.0 });
+            const viewport = page.getViewport({ scale: scale });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
             const ctx = canvas.getContext('2d');
             await page.render({ canvasContext: ctx, viewport }).promise;
             
-            const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.85));
             zip.file(`${baseName}_pg${i}.${format}`, blob);
             updateConverterProgress(`Processando página ${i}/${numPages}...`, file.name, 10 + (i / numPages) * 80);
         }
@@ -894,23 +897,36 @@ async function renderTextToImage(file, format) {
     
     ctx.font = `${fontSize}px 'Inter', sans-serif`;
     
-    // Quebra de texto (Word Wrapping)
+    // Quebra de texto (Word Wrapping) - Improved algorithm
     const maxWidth = canvasWidth - (padding * 2);
-    const words = text.split(/\s+/);
+    const paragraphs = text.split('\n');
     const lines = [];
-    let currentLine = '';
-
-    for (const word of words) {
-        const testLine = currentLine ? currentLine + ' ' + word : word;
-        const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxWidth && currentLine) {
+    
+    for (const paragraph of paragraphs) {
+        const words = paragraph.split(' ');
+        let currentLine = '';
+        
+        for (const word of words) {
+            const testLine = currentLine ? currentLine + ' ' + word : word;
+            const metrics = ctx.measureText(testLine);
+            
+            if (metrics.width > maxWidth && currentLine !== '') {
+                lines.push(currentLine);
+                currentLine = word;
+            } else {
+                currentLine = testLine;
+            }
+        }
+        
+        if (currentLine) {
             lines.push(currentLine);
-            currentLine = word;
-        } else {
-            currentLine = testLine;
+        }
+        
+        // Add empty line between paragraphs
+        if (paragraph !== paragraphs[paragraphs.length - 1]) {
+            lines.push('');
         }
     }
-    lines.push(currentLine);
 
     // Ajusta altura do canvas dinamicamente
     const canvasHeight = Math.max(800, (lines.length * lineHeight) + (padding * 2));
@@ -945,7 +961,7 @@ async function renderTextToImage(file, format) {
     let mimeType = `image/${format}`;
     if (format === 'jpg') mimeType = 'image/jpeg';
     
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.95));
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
     return { originalName: file.name, convertedName: `${baseName}.${format}`, blob, mimeType };
 }
 
@@ -1019,10 +1035,10 @@ async function convertFile(file, format) {
     // Fallback for others (Mock)
     return new Promise((resolve) => {
         setTimeout(() => {
-            const mockBlob = new Blob(["Processamento de documentos em breve!"], { type: 'text/plain' });
+            const mockBlob = new Blob([`Não foi possível converter "${file.name}" para "${format}". Este formato ainda não é suportado.`], { type: 'text/plain' });
             resolve({ 
                 originalName: file.name, 
-                convertedName: `${baseName}.txt`, 
+                convertedName: `${baseName}_nao_convertido.txt`, 
                 blob: mockBlob, 
                 mimeType: 'text/plain',
                 isMock: true 
@@ -1079,11 +1095,30 @@ function writeString(view, offset, string) {
     for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
 }
 
-function updateConverterProgress(title, detail, percent) {
+// Throttle function for progress updates to reduce DOM manipulations
+function throttle(func, limit) {
+    let inThrottle;
+    return function() {
+        const args = arguments;
+        const context = this;
+        if (!inThrottle) {
+            func.apply(context, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    }
+}
+
+// Throttled progress update functions
+const throttledUpdateConverterProgress = throttle(function(title, detail, percent) {
     converterProgressTitle.textContent = title;
     converterProgressDetail.textContent = detail;
     converterProgressBar.style.width = `${Math.min(percent, 100)}%`;
     converterProgressPercent.textContent = `${Math.round(percent)}%`;
+}, 100); // Update at most every 100ms
+
+function updateConverterProgress(title, detail, percent) {
+    throttledUpdateConverterProgress(title, detail, percent);
 }
 
 function displayConverterResults() {
@@ -1160,6 +1195,9 @@ function showPreview(result) {
         previewIcon.textContent = '📄';
     }
 
+    // Store URL for cleanup
+    previewModal.dataset.previewUrl = url;
+
     // Modal buttons
     btnConfirmDownload.onclick = () => {
         const a = document.createElement('a');
@@ -1179,6 +1217,12 @@ function hidePreview() {
     media.forEach(m => {
         if (m.src) URL.revokeObjectURL(m.src);
     });
+    
+    // Revoke the preview URL if it exists
+    if (previewModal.dataset.previewUrl) {
+        URL.revokeObjectURL(previewModal.dataset.previewUrl);
+        delete previewModal.dataset.previewUrl;
+    }
 }
 
 if (btnClosePreview) btnClosePreview.onclick = hidePreview;
@@ -1274,11 +1318,16 @@ function downloadFile(filename, content, mimeType) {
     URL.revokeObjectURL(url);
 }
 
-function updateProgress(title, detail, percent) {
+// Throttled progress update functions
+const throttledUpdateProgress = throttle(function(title, detail, percent) {
     progressTitle.textContent = title;
     progressDetail.textContent = detail;
     progressBar.style.width = `${Math.min(percent, 100)}%`;
     progressPercent.textContent = `${Math.round(percent)}%`;
+}, 100); // Update at most every 100ms
+
+function updateProgress(title, detail, percent) {
+    throttledUpdateProgress(title, detail, percent);
 }
 
 function showToast(message, type = 'success') {

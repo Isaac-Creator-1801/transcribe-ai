@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "repository": {
     "type": "git",
@@ -18,5 +18,14 @@
     "url": "https://github.com/Isaac-Creator-1801/transcribe-ai/issues"
   },
   "homepage": "https://github.com/Isaac-Creator-1801/transcribe-ai#readme",
-  "dependencies": {}
+  "directories": {
+    "test": "tests"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom"
+  }
 }
