@@ -160,13 +160,40 @@ if (btnYoutubeFetch) {
         youtubeStatus.textContent = '⏳ Puxando áudio da nuvem... Isso pode demorar uns instantes.';
         
         try {
-            // Chama a API da Vercel (Online)
-            const response = await fetch(`/api/ytdl?url=${encodeURIComponent(url)}`);
+            // Plano A: Sua própria nuvem na Vercel (Agora com link absoluto para funcionar no GitHub)
+            // Se estivermos na Vercel, usamos o caminho relativo, senão o absoluto.
+            const vercelBase = window.location.hostname.includes('vercel.app') ? '' : 'https://transcribe-ai-alpha.vercel.app';
+            const vercelUrl = `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`;
             
+            console.log('Tentando Plano A (Vercel):', vercelUrl);
+            let response = await fetch(vercelUrl);
+            
+            // Se a Vercel falhar ou estiver bloqueada pelo YouTube (Erro 500)
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                const msg = errorData.error || `Erro Servidor (${response.status})`;
-                throw new Error(msg);
+                console.warn('Plano A falhou (Vercel bloqueada?). Tentando Plano B (Servidor Público Piped)...');
+                youtubeStatus.textContent = '⏳ Plano A falhou. Tentando Plano B (Servidor Público)...';
+                
+                // Plano B: Piped API (Servidore públicos de Invidious que costumam burlar bloqueios)
+                // Tentamos pegar o ID do vídeo
+                const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
+                const videoId = videoIdMatch ? videoIdMatch[1] : null;
+                
+                if (videoId) {
+                    // Instância pública estável do Piped
+                    const pipedRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`);
+                    const pipedData = await pipedRes.json();
+                    
+                    if (pipedData && pipedData.audioStreams && pipedData.audioStreams.length > 0) {
+                        // Pegamos o primeiro stream de áudio disponível
+                        const audioUrl = pipedData.audioStreams[0].url;
+                        response = await fetch(audioUrl); // Busca o áudio real
+                        if (!response.ok) throw new Error('Falha total em todos os servidores.');
+                    } else {
+                        throw new Error('Nenhum servidor conseguiu extrair o áudio desse vídeo.');
+                    }
+                } else {
+                    throw new Error('Link do YouTube inválido.');
+                }
             }
             
             const contentDisposition = response.headers.get('Content-Disposition');
@@ -174,8 +201,6 @@ if (btnYoutubeFetch) {
             if (contentDisposition && contentDisposition.includes('filename="')) {
                 filename = contentDisposition.split('filename="')[1].split('"')[0];
                 filename = decodeURIComponent(filename);
-            } else if (contentDisposition && contentDisposition.includes('filename=')) {
-                filename = contentDisposition.split('filename=')[1];
             }
             
             const blob = await response.blob();
@@ -189,7 +214,7 @@ if (btnYoutubeFetch) {
             showToast(`Aviso: ${error.message}`, 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = `❌ DETALHE: ${error.message}`;
+            youtubeStatus.textContent = `❌ ERRO: Todos os servidores falharam. Tente novamente mais tarde.`;
             
             setTimeout(() => {
                 youtubeStatus.style.display = 'none';
