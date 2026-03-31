@@ -18,10 +18,5 @@
     "url": "https://github.com/Isaac-Creator-1801/transcribe-ai/issues"
   },
   "homepage": "https://github.com/Isaac-Creator-1801/transcribe-ai#readme",
-  "dependencies": {
-    "@distube/ytdl-core": "^4.16.12",
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "youtubei.js": "^17.0.1"
-  }
+  "dependencies": {}
 }
