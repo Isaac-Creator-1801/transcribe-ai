@@ -863,15 +863,90 @@ async function renderPdfToImages(file, format, mode) {
     }
 }
 
+async function renderTextToImage(file, format) {
+    const text = await file.text();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    
+    // Configurações Estéticas (Premium Dark)
+    const padding = 60;
+    const fontSize = 24;
+    const lineHeight = 32;
+    const canvasWidth = 1200; // Estilo postagem larga
+    
+    ctx.font = `${fontSize}px 'Inter', sans-serif`;
+    
+    // Quebra de texto (Word Wrapping)
+    const maxWidth = canvasWidth - (padding * 2);
+    const words = text.split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+        } else {
+            currentLine = testLine;
+        }
+    }
+    lines.push(currentLine);
+
+    // Ajusta altura do canvas dinamicamente
+    const canvasHeight = Math.max(800, (lines.length * lineHeight) + (padding * 2));
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // Desenha Fundo Moderno (Degradê do App)
+    const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+    gradient.addColorStop(0, '#12121a'); // Dark background
+    gradient.addColorStop(1, '#1a1a2e');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // Desenha Detalhe de Borda (Brilho lateral)
+    ctx.fillStyle = 'rgba(124, 92, 252, 0.05)';
+    ctx.fillRect(0, 0, 5, canvasHeight);
+
+    // Desenha Texto
+    ctx.fillStyle = '#e8e8f0'; // text-primary
+    ctx.font = `${fontSize}px 'Inter', sans-serif`;
+    ctx.textBaseline = 'top';
+
+    lines.forEach((line, i) => {
+        ctx.fillText(line, padding, padding + (i * lineHeight));
+    });
+
+    // Logo no rodapé
+    ctx.font = `bold 18px 'Inter', sans-serif`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillText('TranscribeAI', padding, canvasHeight - 40);
+
+    let mimeType = `image/${format}`;
+    if (format === 'jpg') mimeType = 'image/jpeg';
+    
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.95));
+    return { originalName: file.name, convertedName: `${baseName}.${format}`, blob, mimeType };
+}
+
 async function convertFile(file, format) {
     const category = getFileCategory(file);
     const baseName = file.name.replace(/\.[^.]+$/, '');
     const newName = `${baseName}.${format}`;
 
-    // Handle DOCUMENTS (PDF to Image)
+    // Handle DOCUMENTS (PDF or TXT to Image)
     const isPDF = file.name.toLowerCase().endsWith('.pdf');
+    const isTXT = file.name.toLowerCase().endsWith('.txt');
+    
     if (category === 'document' && isPDF && ['png', 'jpg'].includes(format.toLowerCase())) {
         return renderPdfToImages(file, format.toLowerCase(), pdfRenderMode.value);
+    }
+    
+    if (category === 'document' && isTXT && ['png', 'jpg'].includes(format.toLowerCase())) {
+        return renderTextToImage(file, format.toLowerCase());
     }
 
     // Handle IMAGES (using Canvas)
