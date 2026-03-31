@@ -685,8 +685,11 @@ function updateOutputFormats(category) {
     }
 
     // PDF page settings visibility
-    const isPDF = converterFiles.length > 0 && converterFiles[0].file.name.toLowerCase().endsWith('.pdf');
-    if (category === 'document' && isPDF && ['png', 'jpg'].includes(converterOutputFormat.value)) {
+    const firstFile = converterFiles[0]?.file;
+    const isPDF = firstFile && firstFile.name.toLowerCase().endsWith('.pdf');
+    const isExportingToImage = ['png', 'jpg'].includes(converterOutputFormat.value);
+    
+    if (category === 'document' && isPDF && isExportingToImage) {
         pdfPageSettings.classList.remove('hidden');
     } else {
         pdfPageSettings.classList.add('hidden');
@@ -855,8 +858,9 @@ async function convertFile(file, format) {
     const newName = `${baseName}.${format}`;
 
     // Handle DOCUMENTS (PDF to Image)
-    if (category === 'document' && file.name.toLowerCase().endsWith('.pdf') && ['png', 'jpg'].includes(format)) {
-        return renderPdfToImages(file, format, pdfRenderMode.value);
+    const isPDF = file.name.toLowerCase().endsWith('.pdf');
+    if (category === 'document' && isPDF && ['png', 'jpg'].includes(format.toLowerCase())) {
+        return renderPdfToImages(file, format.toLowerCase(), pdfRenderMode.value);
     }
 
     // Handle IMAGES (using Canvas)
