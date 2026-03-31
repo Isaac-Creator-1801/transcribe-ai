@@ -1,4 +1,5 @@
 const { Innertube, UniversalCache } = require('youtubei.js');
+const { Readable } = require('stream');
 
 module.exports = async function handler(req, res) {
     // Configurações de CORS para a Vercel
@@ -15,11 +16,14 @@ module.exports = async function handler(req, res) {
     try {
         const url = req.query.url;
         if (!url) {
-            return res.status(400).json({ error: 'URL do YouTube ausente.' });
+            return res.status(400).json({ error: 'Faltando o URL no link.' });
         }
 
-        // Evita usar cache persistente no servidor Serverless
-        const yt = await Innertube.create({ cache: new UniversalCache(false) });
+        console.log('Iniciando Innertube para URL:', url);
+        const yt = await Innertube.create({ 
+            cache: new UniversalCache(false),
+            generate_session_locally: true 
+        });
         
         let videoId = url;
         const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
@@ -27,37 +31,39 @@ module.exports = async function handler(req, res) {
             videoId = videoIdMatch[1];
         }
 
+        console.log('Extraindo informações do Video ID:', videoId);
         const info = await yt.getInfo(videoId);
 
-        // Prepara para enviar o áudio magicamente
+        if (!info || !info.basic_info) {
+            throw new Error('Não foi possível obter informações do vídeo do YouTube.');
+        }
+
+        // Prepara para enviar o áudio
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(info.basic_info.title)}.webm"`);
         res.setHeader('Content-Type', 'audio/webm');
 
+        console.log('Iniciando o download do áudio...');
         const stream = await yt.download(videoId, {
             type: 'audio',
             quality: 'best',
             format: 'webm'
         });
 
-        // Transforma o fluxo web em fluxo do Servidor Nuvem (Node.js)
-        const reader = stream.getReader();
-        const pump = async () => {
-             const { done, value } = await reader.read();
-             if (done) {
-                 res.end();
-                 return;
-             }
-             res.write(Buffer.from(value));
-             await pump();
-        };
-        await pump();
+        // Transforma o fluxo web para o formato do Node 18+ (compatível com a Vercel)
+        // Isso garante que o áudio seja enviado por "pedaços" (streaming) sem travar
+        Readable.fromWeb(stream).pipe(res);
+
+        res.on('finish', () => console.log('Download concluído com sucesso!'));
+        res.on('error', (err) => console.error('Encontrei esse problema no meio do download:', err));
 
     } catch (error) {
-        console.error('Erro na Vercel Function:', error);
+        console.error('ERRO CRITICO NA VERCEL:', error);
+        // Retorna o erro real para podermos ler no frontend em caso de bloqueio do YouTube
         if (!res.headersSent) {
-            res.status(500).json({ error: 'Falha ao decodificar vídeo online.' });
-        } else {
-            res.end();
+            res.status(500).json({ 
+                error: `Ops! A nuvem deu erro: ${error.message || 'Erro Desconhecido'}`,
+                code: error.code || 'API_FAIL'
+            });
         }
     }
 };

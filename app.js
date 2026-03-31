@@ -165,7 +165,8 @@ if (btnYoutubeFetch) {
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Erro ao conectar com o servidor da nuvem.');
+                const msg = errorData.error || `Erro Servidor (${response.status})`;
+                throw new Error(msg);
             }
             
             const contentDisposition = response.headers.get('Content-Disposition');
@@ -182,18 +183,18 @@ if (btnYoutubeFetch) {
             
             youtubeUrlInput.value = '';
             addFile(file);
-            showToast('Áudio do YouTube adicionado com sucesso!', 'success');
+            showToast('Áudio do YouTube adicionado!', 'success');
         } catch (error) {
             console.error('YouTube Fetch Error:', error);
-            showToast('Aviso: Certifique-se que o site está online (ex: Vercel) e o link está correto.', 'error');
+            showToast(`Aviso: ${error.message}`, 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = '❌ Erro de conexão com a API da Nuvem.';
-            // Do not hide the error on catch so the user sees instructions
+            youtubeStatus.textContent = `❌ DETALHE: ${error.message}`;
+            
             setTimeout(() => {
                 youtubeStatus.style.display = 'none';
                 youtubeStatus.style.color = 'var(--text-secondary)';
-            }, 6000);
+            }, 8000);
         } finally {
             btnYoutubeFetch.disabled = false;
             btnYoutubeFetch.style.opacity = '1';
