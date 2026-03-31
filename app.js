@@ -164,15 +164,15 @@ if (btnYoutubeFetch) {
             const videoId = videoIdMatch ? videoIdMatch[1] : null;
             if (!videoId) throw new Error('Link do YouTube inválido.');
 
-            // ---- LISTA DE SERVIDORES DE SOBREVIVÊNCIA (PLANOS) ----
+            // ---- LISTA DE SOBREVIVÊNCIA (PLANOS) ----
             const vercelBase = window.location.hostname.includes('vercel.app') ? '' : 'https://transcribe-ai-alpha.vercel.app';
             
             const sources = [
-                { name: 'Sua Nuvem (Vercel)', url: `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`, type: 'proxy' },
-                { name: 'Piped 1', url: `https://pipedapi.kavin.rocks/streams/${videoId}`, type: 'piped' },
-                { name: 'Piped 2', url: `https://pipedapi.lunar.icu/streams/${videoId}`, type: 'piped' },
-                { name: 'Piped (Seguro)', url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://pipedapi.kavin.rocks/streams/${videoId}`)}`, type: 'allorigins' },
-                { name: 'Invidious (Backup)', url: `https://inv.tux.rs/api/v1/videos/${videoId}`, type: 'invidious' }
+                { name: 'Nuvem Privada (Vercel)', url: `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`, type: 'proxy' },
+                { name: 'Rede Piped (Instância 1)', url: `https://pipedapi.lunar.icu/streams/${videoId}`, type: 'piped' },
+                { name: 'Rede Piped (Instância 2)', url: `https://pipedapi.colby.host/streams/${videoId}`, type: 'piped' },
+                { name: 'Rede Invidious (Backup)', url: `https://invidious.snopyta.org/api/v1/videos/${videoId}`, type: 'invidious' },
+                { name: 'Túnel de Segurança (Proxy)', url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://pipedapi.lunar.icu/streams/${videoId}`)}`, type: 'allorigins' }
             ];
 
             let response;
@@ -180,7 +180,6 @@ if (btnYoutubeFetch) {
 
             for (let i = 0; i < sources.length; i++) {
                 const source = sources[i];
-                console.log(`Tentando ${source.name}...`);
                 youtubeStatus.textContent = `⏳ Tentando ${source.name}... (${i+1}/${sources.length})`;
                 
                 try {
@@ -192,7 +191,11 @@ if (btnYoutubeFetch) {
                         const infoRes = await fetch(source.url);
                         if (!infoRes.ok) continue;
                         const data = await infoRes.json();
-                        const audioUrl = data.audioStreams ? data.audioStreams[0].url : (data.adaptiveFormats ? data.adaptiveFormats.find(f => f.type.includes('audio')).url : null);
+                        let audioUrl = null;
+                        
+                        if (data.audioStreams) audioUrl = data.audioStreams[0].url;
+                        else if (data.adaptiveFormats) audioUrl = data.adaptiveFormats.find(f => f.type && f.type.includes('audio'))?.url;
+
                         if (audioUrl) {
                             response = await fetch(audioUrl);
                             if (response.ok) { success = true; break; }
@@ -208,11 +211,24 @@ if (btnYoutubeFetch) {
                         }
                     }
                 } catch (e) {
-                    console.error(`Falha no ${source.name}:`, e);
+                    console.warn(`Servidor ${source.name} ocupado.`);
                 }
             }
 
-            if (!success || !response) throw new Error('Todos os 5 servidores públicos falharam ou estão ocupados. Tente baixar o vídeo manualmente.');
+            if (!success || !response) {
+                // ---- MODO ASSISTENTE (O PLANO QUE NUNCA FALHA) ----
+                youtubeStatus.style.display = 'block';
+                youtubeStatus.style.color = '#ffcc00';
+                youtubeStatus.innerHTML = `
+                    ⚠️ Os servidores automáticos estão bloqueados pelo YouTube.<br>
+                    <a href="https://cobalt.tools/?url=${encodeURIComponent(url)}" target="_blank" 
+                       style="display:inline-block; margin-top:10px; padding:8px 15px; background:#ffcc00; color:#000; border-radius:5px; text-decoration:none; font-weight:bold;">
+                       🚀 Baixe o Áudio Manualmente Aqui
+                    </a><br>
+                    <small style="display:block; margin-top:5px; color:#aaa;">Depois arraste o arquivo para o quadrado abaixo!</small>
+                `;
+                return;
+            }
             
             const contentDisposition = response.headers.get('Content-Disposition');
             let filename = 'youtube_audio.webm';
@@ -229,14 +245,10 @@ if (btnYoutubeFetch) {
             showToast('Sucesso! Áudio carregado.', 'success');
         } catch (error) {
             console.error('YouTube Survival Error:', error);
-            showToast(`Erro: ${error.message}`, 'error');
+            showToast(`Erro de Rede: ${error.message}`, 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = `❌ FALHA GERAL: YouTube bloqueou o download online agora. Tente um arquivo local.`;
-            
-            setTimeout(() => {
-                youtubeStatus.style.display = 'none';
-            }, 12000);
+            youtubeStatus.textContent = `❌ Conexão instável. Tente um arquivo do seu computador.`;
         } finally {
             btnYoutubeFetch.disabled = false;
             btnYoutubeFetch.style.opacity = '1';
