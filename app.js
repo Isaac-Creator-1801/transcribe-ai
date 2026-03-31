@@ -160,64 +160,59 @@ if (btnYoutubeFetch) {
         youtubeStatus.textContent = '⏳ Puxando áudio da nuvem... Isso pode demorar uns instantes.';
         
         try {
-            // ---- PLANO A: Sua Nuvem Vercel (Privado e Rápido) ----
-            const vercelBase = window.location.hostname.includes('vercel.app') ? '' : 'https://transcribe-ai-alpha.vercel.app';
-            const vercelUrl = `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`;
-            
-            console.log('Tentando PLANO A (Vercel):', vercelUrl);
-            youtubeStatus.textContent = '⏳ PLANO A: Puxando da sua nuvem...';
-            
-            let response;
-            try {
-                response = await fetch(vercelUrl);
-            } catch (e) {
-                console.error('Falha de rede/CORS no Plano A:', e);
-            }
-            
-            // ---- SE O PLANO A FALHAR (OU DER ERRO 500) ----
-            if (!response || !response.ok) {
-                console.warn('PLANO A falhou. Tentando PLANO B (Servidor Público Piped)...');
-                youtubeStatus.textContent = '⏳ PLANO B: Mudando para servidor público...';
-                
-                const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-                const videoId = videoIdMatch ? videoIdMatch[1] : null;
-                
-                if (!videoId) throw new Error('Link do YouTube inválido.');
+            const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
+            const videoId = videoIdMatch ? videoIdMatch[1] : null;
+            if (!videoId) throw new Error('Link do YouTube inválido.');
 
-                // Tentativa B: Piped API Direta
+            // ---- LISTA DE SERVIDORES DE SOBREVIVÊNCIA (PLANOS) ----
+            const vercelBase = window.location.hostname.includes('vercel.app') ? '' : 'https://transcribe-ai-alpha.vercel.app';
+            
+            const sources = [
+                { name: 'Sua Nuvem (Vercel)', url: `${vercelBase}/api/ytdl?url=${encodeURIComponent(url)}`, type: 'proxy' },
+                { name: 'Piped 1', url: `https://pipedapi.kavin.rocks/streams/${videoId}`, type: 'piped' },
+                { name: 'Piped 2', url: `https://pipedapi.lunar.icu/streams/${videoId}`, type: 'piped' },
+                { name: 'Piped (Seguro)', url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://pipedapi.kavin.rocks/streams/${videoId}`)}`, type: 'allorigins' },
+                { name: 'Invidious (Backup)', url: `https://inv.tux.rs/api/v1/videos/${videoId}`, type: 'invidious' }
+            ];
+
+            let response;
+            let success = false;
+
+            for (let i = 0; i < sources.length; i++) {
+                const source = sources[i];
+                console.log(`Tentando ${source.name}...`);
+                youtubeStatus.textContent = `⏳ Tentando ${source.name}... (${i+1}/${sources.length})`;
+                
                 try {
-                    const pipedRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`);
-                    const pipedData = await pipedRes.json();
-                    if (pipedData && pipedData.audioStreams && pipedData.audioStreams.length > 0) {
-                        response = await fetch(pipedData.audioStreams[0].url);
+                    if (source.type === 'proxy') {
+                        response = await fetch(source.url);
+                        if (response.ok) { success = true; break; }
+                    } 
+                    else if (source.type === 'piped' || source.type === 'invidious') {
+                        const infoRes = await fetch(source.url);
+                        if (!infoRes.ok) continue;
+                        const data = await infoRes.json();
+                        const audioUrl = data.audioStreams ? data.audioStreams[0].url : (data.adaptiveFormats ? data.adaptiveFormats.find(f => f.type.includes('audio')).url : null);
+                        if (audioUrl) {
+                            response = await fetch(audioUrl);
+                            if (response.ok) { success = true; break; }
+                        }
+                    }
+                    else if (source.type === 'allorigins') {
+                        const proxyRes = await fetch(source.url);
+                        const proxyJson = await proxyRes.json();
+                        const data = JSON.parse(proxyJson.contents);
+                        if (data && data.audioStreams && data.audioStreams.length > 0) {
+                            response = await fetch(data.audioStreams[0].url);
+                            if (response.ok) { success = true; break; }
+                        }
                     }
                 } catch (e) {
-                    console.error('Falha no Plano B:', e);
+                    console.error(`Falha no ${source.name}:`, e);
                 }
             }
 
-            // ---- PLANO C: Proxy de Emergência (Para pular bloqueios do navegador) ----
-            if (!response || !response.ok) {
-                console.warn('PLANO B falhou. Tentando PLANO C (Túnel de Emergência)...');
-                youtubeStatus.textContent = '⏳ PLANO C: Ativando túnel de emergência...';
-                
-                const videoIdMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-                const videoId = videoIdMatch ? videoIdMatch[1] : null;
-                
-                // Usamos o AllOrigins para buscar o link do áudio quando o navegador bloqueia o acesso direto
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://pipedapi.kavin.rocks/streams/${videoId}`)}`;
-                const proxyRes = await fetch(proxyUrl);
-                const proxyJson = await proxyRes.json();
-                const pipedData = JSON.parse(proxyJson.contents);
-                
-                if (pipedData && pipedData.audioStreams && pipedData.audioStreams.length > 0) {
-                    response = await fetch(pipedData.audioStreams[0].url);
-                } else {
-                    throw new Error('Todos os servidores de download estão ocupados.');
-                }
-            }
-
-            if (!response || !response.ok) throw new Error('Não foi possível obter o arquivo de áudio.');
+            if (!success || !response) throw new Error('Todos os 5 servidores públicos falharam ou estão ocupados. Tente baixar o vídeo manualmente.');
             
             const contentDisposition = response.headers.get('Content-Disposition');
             let filename = 'youtube_audio.webm';
@@ -233,15 +228,15 @@ if (btnYoutubeFetch) {
             addFile(file);
             showToast('Sucesso! Áudio carregado.', 'success');
         } catch (error) {
-            console.error('YouTube Final Error:', error);
-            showToast(`Erro Crítico: ${error.message}`, 'error');
+            console.error('YouTube Survival Error:', error);
+            showToast(`Erro: ${error.message}`, 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = `❌ FALHA GERAL: Tente um arquivo local. (${error.message})`;
+            youtubeStatus.textContent = `❌ FALHA GERAL: YouTube bloqueou o download online agora. Tente um arquivo local.`;
             
             setTimeout(() => {
                 youtubeStatus.style.display = 'none';
-            }, 10000);
+            }, 12000);
         } finally {
             btnYoutubeFetch.disabled = false;
             btnYoutubeFetch.style.opacity = '1';
