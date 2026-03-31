@@ -55,6 +55,8 @@ const converterResultSection = document.getElementById('converter-result-section
 const converterResultsContainer = document.getElementById('converter-results-container');
 const converterBtnDownloadAll = document.getElementById('converter-btn-download-all');
 const converterBtnNew = document.getElementById('converter-btn-new');
+const conversionDirection = document.getElementById('conversion-direction');
+const inputCategoryBadge = document.getElementById('input-category-badge');
 
 // =========================================
 // State
@@ -72,6 +74,32 @@ let fileIdCounter = 0;
 let converterFiles = [];
 let converterResults = [];
 let converterFileIdCounter = 0;
+
+// =========================================
+// Mapeamento de Formatos (Estilo CloudConvert)
+// =========================================
+const CONVERSION_MAP = {
+    'audio': {
+        icon: '🎵',
+        outputs: ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac']
+    },
+    'video': {
+        icon: '🎬',
+        outputs: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'mp3', 'wav']
+    },
+    'image': {
+        icon: '🖼️',
+        outputs: ['png', 'jpg', 'webp', 'svg', 'gif', 'bmp']
+    },
+    'document': {
+        icon: '📄',
+        outputs: ['pdf', 'docx', 'txt', 'html']
+    },
+    'archive': {
+        icon: '📦',
+        outputs: ['zip', 'rar', '7z', 'tar.gz']
+    }
+};
 
 // =========================================
 // Tab Switching
@@ -595,22 +623,64 @@ function handleConverterFiles(fileList) {
     let added = 0;
     for (const file of fileList) {
         const ext = file.name.split('.').pop().toLowerCase();
-        if (file.type.startsWith('video/') || file.type.startsWith('audio/') || validExts.includes(ext)) {
-            addConverterFile(file);
+        const category = getFileCategory(file);
+        
+        if (category) {
+            addConverterFile(file, category);
             added++;
         }
     }
-    if (added === 0) showToast('Nenhum formato suportado.', 'error');
+    if (added === 0) showToast('Formato não suportado ainda.', 'error');
 }
 
-function addConverterFile(file) {
+function getFileCategory(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const type = file.type;
+
+    if (type.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext)) return 'audio';
+    if (type.startsWith('video/') || ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return 'video';
+    if (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'bmp'].includes(ext)) return 'image';
+    if (['pdf', 'docx', 'doc', 'txt', 'html', 'rtf'].includes(ext)) return 'document';
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive';
+    
+    return null;
+}
+
+function addConverterFile(file, category) {
     const id = ++converterFileIdCounter;
-    converterFiles.push({ id, file });
+    converterFiles.push({ id, file, category });
     renderConverterFilesList();
+    
+    // Update output options based on the first file or common category
+    updateOutputFormats(category);
+    
     converterUploadZone.style.display = 'none';
     converterFileInfo.classList.remove('hidden');
     converterSettings.classList.remove('hidden');
     btnConvert.classList.remove('hidden');
+}
+
+function updateOutputFormats(category) {
+    if (!category || !CONVERSION_MAP[category]) return;
+    
+    const formats = CONVERSION_MAP[category].outputs;
+    const catInfo = CONVERSION_MAP[category];
+    
+    // Update UI Badge
+    inputCategoryBadge.innerHTML = `<span>${catInfo.icon}</span> ${category.charAt(0).toUpperCase() + category.slice(1)}`;
+    conversionDirection.classList.remove('hidden');
+
+    converterOutputFormat.innerHTML = formats.map(fmt => {
+        const label = fmt.toUpperCase();
+        return `<option value="${fmt}">${label}</option>`;
+    }).join('');
+    
+    // Quality select visibility
+    if (['audio', 'video'].includes(category)) {
+        converterQualitySelect.parentElement.classList.remove('hidden');
+    } else {
+        converterQualitySelect.parentElement.classList.add('hidden');
+    }
 }
 
 function removeConverterFile(id) {
@@ -622,6 +692,10 @@ function removeConverterFile(id) {
         converterUploadZone.style.display = '';
     } else {
         renderConverterFilesList();
+        // Recalculate options if needed (for simplicity we use the last added or first)
+        if (converterFiles.length > 0) {
+            updateOutputFormats(converterFiles[0].category);
+        }
     }
 }
 
@@ -629,12 +703,10 @@ function renderConverterFilesList() {
     const count = converterFiles.length;
     converterFilesCount.textContent = count === 1 ? '1 arquivo selecionado' : `${count} arquivos selecionados`;
 
-    converterFilesList.innerHTML = converterFiles.map(({ id, file }) => {
-        const ext = file.name.split('.').pop().toLowerCase();
-        const isVideo = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi', 'mov'].includes(ext);
-        const icon = isVideo
-            ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 6 4-6 4Z"/></svg>`
-            : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+    converterFilesList.innerHTML = converterFiles.map(({ id, file, category }) => {
+        const cat = category || 'other';
+        const iconChar = CONVERSION_MAP[cat]?.icon || '📄';
+        const icon = `<span style="font-size: 20px; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px;">${iconChar}</span>`;
         return `
             <div class="file-item" data-id="${id}">
                 <div class="file-item-left">
@@ -709,29 +781,73 @@ async function startConversion() {
 }
 
 async function convertFile(file, format) {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-    // Render to WAV
-    const offlineCtx = new OfflineAudioContext(
-        audioBuffer.numberOfChannels,
-        audioBuffer.length,
-        audioBuffer.sampleRate
-    );
-    const source = offlineCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(offlineCtx.destination);
-    source.start();
-    const renderedBuffer = await offlineCtx.startRendering();
-    await audioContext.close();
-
-    // Encode to WAV
-    const wavBlob = audioBufferToWav(renderedBuffer);
+    const category = getFileCategory(file);
     const baseName = file.name.replace(/\.[^.]+$/, '');
-    const newName = `${baseName}.wav`;
+    const newName = `${baseName}.${format}`;
 
-    return { originalName: file.name, convertedName: newName, blob: wavBlob, mimeType: 'audio/wav' };
+    // Handle IMAGES (using Canvas)
+    if (category === 'image') {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    
+                    let mimeType = `image/${format}`;
+                    if (format === 'jpg') mimeType = 'image/jpeg';
+                    
+                    canvas.toBlob((blob) => {
+                        resolve({ originalName: file.name, convertedName: newName, blob, mimeType });
+                    }, mimeType, 0.92);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // Handle AUDIO (current PCM/WAV implementation)
+    if (category === 'audio' || (category === 'video' && ['wav', 'mp3'].includes(format))) {
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const offlineCtx = new OfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineCtx.destination);
+            source.start();
+            const renderedBuffer = await offlineCtx.startRendering();
+            await audioContext.close();
+            const wavBlob = audioBufferToWav(renderedBuffer);
+            
+            // For now, even if they select MP3, we give a high-quality WAV (lossless)
+            // or we could use an external library for MP3
+            return { originalName: file.name, convertedName: `${baseName}.wav`, blob: wavBlob, mimeType: 'audio/wav' };
+        } catch (e) {
+            console.error('Audio processing failed', e);
+            throw new Error('Falha ao processar áudio localmente.');
+        }
+    }
+
+    // Fallback for others (Mock)
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            const mockBlob = new Blob(["Processamento de documentos em breve!"], { type: 'text/plain' });
+            resolve({ 
+                originalName: file.name, 
+                convertedName: `${baseName}.txt`, 
+                blob: mockBlob, 
+                mimeType: 'text/plain',
+                isMock: true 
+            });
+        }, 1000);
+    });
 }
 
 function audioBufferToWav(buffer) {
