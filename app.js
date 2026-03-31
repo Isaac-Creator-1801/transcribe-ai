@@ -157,15 +157,15 @@ if (btnYoutubeFetch) {
         btnYoutubeFetch.disabled = true;
         btnYoutubeFetch.style.opacity = '0.7';
         youtubeStatus.style.display = 'block';
-        youtubeStatus.textContent = '⏳ Baixando áudio do YouTube... (O servidor local fará o download)';
+        youtubeStatus.textContent = '⏳ Puxando áudio da nuvem... Isso pode demorar uns instantes.';
         
         try {
-            // Chama o servidor local configurado no server.js
-            const response = await fetch(`http://localhost:3000/api/ytdl?url=${encodeURIComponent(url)}`);
+            // Chama a API da Vercel (Online)
+            const response = await fetch(`/api/ytdl?url=${encodeURIComponent(url)}`);
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Erro ao conectar com o servidor local.');
+                throw new Error(errorData.error || 'Erro ao conectar com o servidor da nuvem.');
             }
             
             const contentDisposition = response.headers.get('Content-Disposition');
@@ -185,10 +185,10 @@ if (btnYoutubeFetch) {
             showToast('Áudio do YouTube adicionado com sucesso!', 'success');
         } catch (error) {
             console.error('YouTube Fetch Error:', error);
-            showToast('Falha: Você iniciou o servidor com Iniciar_TranscribeAI.bat?', 'error');
+            showToast('Aviso: Certifique-se que o site está online (ex: Vercel) e o link está correto.', 'error');
             youtubeStatus.style.display = 'block';
             youtubeStatus.style.color = '#ff4444';
-            youtubeStatus.textContent = '❌ Erro de conexão. Lembre-se de rodar pelo "Iniciar_TranscribeAI.bat" primeiro.';
+            youtubeStatus.textContent = '❌ Erro de conexão com a API da Nuvem.';
             // Do not hide the error on catch so the user sees instructions
             setTimeout(() => {
                 youtubeStatus.style.display = 'none';
