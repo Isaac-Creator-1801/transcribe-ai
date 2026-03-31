@@ -672,11 +672,22 @@ function updateOutputFormats(category) {
     inputCategoryBadge.innerHTML = `<span>${catInfo.icon}</span> ${category.charAt(0).toUpperCase() + category.slice(1)}`;
     conversionDirection.classList.remove('hidden');
 
-    converterOutputFormat.innerHTML = formats.map(fmt => {
-        const label = fmt.toUpperCase();
-        return `<option value="${fmt}">${label}</option>`;
-    }).join('');
+    // ONLY re-render options if they are different from current ones
+    const currentOptions = Array.from(converterOutputFormat.options).map(o => o.value);
+    const areDifferent = formats.length !== currentOptions.length || !formats.every((f, i) => f === currentOptions[i]);
+
+    if (areDifferent) {
+        converterOutputFormat.innerHTML = formats.map(fmt => {
+            const label = fmt.toUpperCase();
+            return `<option value="${fmt}">${label}</option>`;
+        }).join('');
+    }
     
+    // Update specific UI details (visibility only)
+    toggleConverterSettingsVisibility(category);
+}
+
+function toggleConverterSettingsVisibility(category) {
     // Quality select visibility
     if (['audio', 'video'].includes(category)) {
         converterQualitySelect.parentElement.classList.remove('hidden');
@@ -699,7 +710,7 @@ function updateOutputFormats(category) {
 // Add event listener to update visibility when output format changes
 if (converterOutputFormat) {
     converterOutputFormat.addEventListener('change', () => {
-        if (converterFiles.length > 0) updateOutputFormats(converterFiles[0].category);
+        if (converterFiles.length > 0) toggleConverterSettingsVisibility(converterFiles[0].category);
     });
 }
 
