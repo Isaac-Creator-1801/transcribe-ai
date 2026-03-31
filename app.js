@@ -140,6 +140,68 @@ uploadZone.addEventListener('drop', (e) => {
 });
 
 // =========================================
+// YouTube Fetch Handling
+// =========================================
+const btnYoutubeFetch = document.getElementById('btn-youtube-fetch');
+const youtubeUrlInput = document.getElementById('youtube-url');
+const youtubeStatus = document.getElementById('youtube-status');
+
+if (btnYoutubeFetch) {
+    btnYoutubeFetch.addEventListener('click', async () => {
+        const url = youtubeUrlInput.value.trim();
+        if (!url) {
+            showToast('Por favor, insira um link válido do YouTube.', 'error');
+            return;
+        }
+        
+        btnYoutubeFetch.disabled = true;
+        btnYoutubeFetch.style.opacity = '0.7';
+        youtubeStatus.style.display = 'block';
+        youtubeStatus.textContent = '⏳ Baixando áudio do YouTube... (O servidor local fará o download)';
+        
+        try {
+            // Chama o servidor local configurado no server.js
+            const response = await fetch(`http://localhost:3000/api/ytdl?url=${encodeURIComponent(url)}`);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Erro ao conectar com o servidor local.');
+            }
+            
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'youtube_audio.webm';
+            if (contentDisposition && contentDisposition.includes('filename="')) {
+                filename = contentDisposition.split('filename="')[1].split('"')[0];
+                filename = decodeURIComponent(filename);
+            } else if (contentDisposition && contentDisposition.includes('filename=')) {
+                filename = contentDisposition.split('filename=')[1];
+            }
+            
+            const blob = await response.blob();
+            const file = new File([blob], filename, { type: blob.type || 'audio/webm' });
+            
+            youtubeUrlInput.value = '';
+            addFile(file);
+            showToast('Áudio do YouTube adicionado com sucesso!', 'success');
+        } catch (error) {
+            console.error('YouTube Fetch Error:', error);
+            showToast('Falha: Você iniciou o servidor com Iniciar_TranscribeAI.bat?', 'error');
+            youtubeStatus.style.display = 'block';
+            youtubeStatus.style.color = '#ff4444';
+            youtubeStatus.textContent = '❌ Erro de conexão. Lembre-se de rodar pelo "Iniciar_TranscribeAI.bat" primeiro.';
+            // Do not hide the error on catch so the user sees instructions
+            setTimeout(() => {
+                youtubeStatus.style.display = 'none';
+                youtubeStatus.style.color = 'var(--text-secondary)';
+            }, 6000);
+        } finally {
+            btnYoutubeFetch.disabled = false;
+            btnYoutubeFetch.style.opacity = '1';
+        }
+    });
+}
+
+// =========================================
 // Recording Handling
 // =========================================
 btnRecord.addEventListener('click', (e) => {
