@@ -347,6 +347,32 @@
         </footer>
     </div>
 
+    <!-- Preview Modal -->
+    <div class="modal-overlay hidden" id="preview-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <div class="modal-icon" id="preview-icon">👁️</div>
+                    <div>
+                        <h3 class="modal-title">Prévia do Arquivo</h3>
+                        <p class="modal-subtitle" id="preview-filename">nome-do-arquivo.png</p>
+                    </div>
+                </div>
+                <button class="btn-close-modal" id="btn-close-preview">&times;</button>
+            </div>
+            <div class="modal-content" id="preview-content">
+                <!-- Dynamic content (img, audio, pre) -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel-modal" id="btn-cancel-preview">Cancelar</button>
+                <button class="btn-confirm-modal" id="btn-confirm-download">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    Baixar Agora
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="app.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>

@@ -59,6 +59,13 @@ const conversionDirection = document.getElementById('conversion-direction');
 const inputCategoryBadge = document.getElementById('input-category-badge');
 const pdfPageSettings = document.getElementById('pdf-page-settings');
 const pdfRenderMode = document.getElementById('pdf-render-mode');
+const previewModal = document.getElementById('preview-modal');
+const previewContent = document.getElementById('preview-content');
+const previewFilename = document.getElementById('preview-filename');
+const btnClosePreview = document.getElementById('btn-close-preview');
+const btnCancelPreview = document.getElementById('btn-cancel-preview');
+const btnConfirmDownload = document.getElementById('btn-confirm-download');
+const previewIcon = document.getElementById('preview-icon');
 
 // =========================================
 // State
@@ -540,8 +547,13 @@ function addCardEventListeners() {
             e.stopPropagation();
             const idx = parseInt(btn.getAttribute('data-index'));
             const r = transcriptionResults[idx];
-            downloadFile(`${r.fileName.replace(/\.[^.]+$/, '')}_transcricao.txt`, getPlainTextForResult(idx), 'text/plain');
-            showToast('Arquivo TXT baixado!', 'success');
+            const content = getPlainTextForResult(idx);
+            const fileName = `${r.fileName.replace(/\.[^.]+$/, '')}_transcricao.txt`;
+            showPreview({ 
+                blob: new Blob([content], { type: 'text/plain' }), 
+                convertedName: fileName, 
+                mimeType: 'text/plain' 
+            });
         });
     });
 
@@ -550,8 +562,13 @@ function addCardEventListeners() {
             e.stopPropagation();
             const idx = parseInt(btn.getAttribute('data-index'));
             const r = transcriptionResults[idx];
-            downloadFile(`${r.fileName.replace(/\.[^.]+$/, '')}_legenda.srt`, generateSRTForResult(idx), 'text/srt');
-            showToast('Arquivo SRT baixado!', 'success');
+            const content = generateSRTForResult(idx);
+            const fileName = `${r.fileName.replace(/\.[^.]+$/, '')}_legendas.srt`;
+            showPreview({ 
+                blob: new Blob([content], { type: 'text/plain' }), 
+                convertedName: fileName, 
+                mimeType: 'text/plain' 
+            });
         });
     });
 
@@ -1094,15 +1111,83 @@ function displayConverterResults() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const idx = parseInt(btn.getAttribute('data-index'));
-            const r = converterResults[idx];
-            const url = URL.createObjectURL(r.blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = r.convertedName;
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            showToast('Arquivo convertido baixado!', 'success');
+            showPreview(converterResults[idx]);
         });
     });
+}
+
+function showPreview(result) {
+    const { blob, convertedName, mimeType } = result;
+    previewFilename.textContent = convertedName;
+    previewContent.innerHTML = '';
+    
+    const url = URL.createObjectURL(blob);
+    
+    if (mimeType.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'preview-img';
+        previewContent.appendChild(img);
+        previewIcon.textContent = '🖼️';
+    } else if (mimeType.startsWith('audio/')) {
+        const audio = document.createElement('audio');
+        audio.src = url;
+        audio.controls = true;
+        audio.className = 'preview-audio';
+        previewContent.appendChild(audio);
+        previewIcon.textContent = '🎵';
+    } else if (mimeType === 'text/plain' || convertedName.endsWith('.srt')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const pre = document.createElement('pre');
+            pre.className = 'preview-text';
+            pre.textContent = e.target.result;
+            previewContent.appendChild(pre);
+        };
+        reader.readAsText(blob);
+        previewIcon.textContent = '📝';
+    } else if (mimeType === 'application/zip') {
+        previewContent.innerHTML = `
+            <div style="text-align: center; color: var(--text-secondary);">
+                <div style="font-size: 3rem; margin-bottom: 16px;">📦</div>
+                <p>Este arquivo contém múltiplas imagens compactadas.</p>
+                <p style="font-size: 0.8rem; margin-top: 8px;">O preview individual não está disponível para pacotes ZIP.</p>
+            </div>
+        `;
+        previewIcon.textContent = '📦';
+    } else {
+        previewContent.innerHTML = `<p style="color: var(--text-muted);">Preview não disponível para este formato.</p>`;
+        previewIcon.textContent = '📄';
+    }
+
+    // Modal buttons
+    btnConfirmDownload.onclick = () => {
+        const a = document.createElement('a');
+        a.href = url; a.download = convertedName;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        hidePreview();
+        showToast('Download concluído!', 'success');
+    };
+
+    previewModal.classList.remove('hidden');
+}
+
+function hidePreview() {
+    previewModal.classList.add('hidden');
+    // Clear content cleanup
+    const media = previewContent.querySelectorAll('audio, video, img');
+    media.forEach(m => {
+        if (m.src) URL.revokeObjectURL(m.src);
+    });
+}
+
+if (btnClosePreview) btnClosePreview.onclick = hidePreview;
+if (btnCancelPreview) btnCancelPreview.onclick = hidePreview;
+// Close on overlay click
+if (previewModal) {
+    previewModal.onclick = (e) => {
+        if (e.target === previewModal) hidePreview();
+    };
 }
 
 if (converterBtnDownloadAll) {
