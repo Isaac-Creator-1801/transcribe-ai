@@ -357,6 +357,7 @@ async function startTranscription() {
     if (currentFiles.length === 0) return;
 
     btnTranscribe.disabled = true;
+    resetProgressUI();
     progressSection.classList.remove('hidden');
     fileInfoSection.querySelector('.settings-row').style.opacity = '0.5';
     fileInfoSection.querySelector('.settings-row').style.pointerEvents = 'none';
@@ -370,7 +371,7 @@ async function startTranscription() {
         const selectedLang = languageSelect.value;
         const lang = selectedLang === 'null' ? null : selectedLang;
 
-        updateProgress('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
+        updateProgressDirect('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
 
         // Initialize worker with cache buster to force update
         if (!aiWorker) {
@@ -415,10 +416,18 @@ async function startTranscription() {
         await runCommand(
             { type: 'load', model: selectedModel },
             (progress) => {
-                if (progress.status === 'progress' && progress.progress) {
-                    const pct = Math.round(progress.progress);
-                    updateProgressDirect('Baixando modelo de IA...', `${progress.file || ''} — ${pct}%`, 5 + (pct * 0.25));
-                } else if (progress.status === 'ready') {
+                const pct = getProgressPercent(progress);
+                if (pct !== null) {
+                    const safePct = clampPercent(pct);
+                    const fileLabel = progress?.file || progress?.name || 'Baixando...';
+                    updateProgressDirect(
+                        'Baixando modelo de IA...',
+                        `${fileLabel} — ${Math.round(safePct)}%`,
+                        5 + (safePct * 0.25)
+                    );
+                }
+
+                if (progress?.status === 'ready' || progress?.status === 'done') {
                     updateProgressDirect('Modelo carregado!', 'Iniciando transcrições...', 35);
                 }
             }
@@ -1193,10 +1202,11 @@ function throttle(func, limit) {
 
 // Throttled progress update functions
 const throttledUpdateConverterProgress = throttle(function(title, detail, percent) {
+    const safePercent = clampPercent(percent);
     converterProgressTitle.textContent = title;
     converterProgressDetail.textContent = detail;
-    converterProgressBar.style.width = `${Math.min(percent, 100)}%`;
-    converterProgressPercent.textContent = `${Math.round(percent)}%`;
+    converterProgressBar.style.width = `${safePercent}%`;
+    converterProgressPercent.textContent = `${Math.round(safePercent)}%`;
 }, 100); // Update at most every 100ms
 
 function updateConverterProgress(title, detail, percent) {
@@ -1385,6 +1395,29 @@ function formatFileSize(bytes) {
     return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+function clampPercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    return Math.min(Math.max(num, 0), 100);
+}
+
+function getProgressPercent(progress) {
+    if (!progress) return null;
+
+    const rawProgress = Number(progress.progress);
+    if (Number.isFinite(rawProgress)) {
+        return rawProgress <= 1 ? rawProgress * 100 : rawProgress;
+    }
+
+    const loaded = Number(progress.loaded);
+    const total = Number(progress.total);
+    if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
+        return (loaded / total) * 100;
+    }
+
+    return null;
+}
+
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -1402,10 +1435,11 @@ function downloadFile(filename, content, mimeType) {
 
 // Throttled progress update functions (for frequent chunk-by-chunk updates)
 const throttledUpdateProgress = throttle(function(title, detail, percent) {
+    const safePercent = clampPercent(percent);
     progressTitle.textContent = title;
     progressDetail.textContent = detail;
-    progressBar.style.width = `${Math.min(percent, 100)}%`;
-    progressPercent.textContent = `${Math.round(percent)}%`;
+    progressBar.style.width = `${safePercent}%`;
+    progressPercent.textContent = `${Math.round(safePercent)}%`;
 }, 80); // Update at most every 80ms for smooth animation
 
 // Throttled version — use for frequent updates (chunk progress)
@@ -1416,10 +1450,15 @@ function updateProgress(title, detail, percent) {
 // Direct (non-throttled) version — use for critical/phase-change updates
 // that MUST be reflected immediately (model loaded, file completed, 100%, etc.)
 function updateProgressDirect(title, detail, percent) {
+    const safePercent = clampPercent(percent);
     progressTitle.textContent = title;
     progressDetail.textContent = detail;
-    progressBar.style.width = `${Math.min(percent, 100)}%`;
-    progressPercent.textContent = `${Math.round(percent)}%`;
+    progressBar.style.width = `${safePercent}%`;
+    progressPercent.textContent = `${Math.round(safePercent)}%`;
+}
+
+function resetProgressUI() {
+    updateProgressDirect('Preparando...', 'Aguardando início...', 0);
 }
 
 function showToast(message, type = 'success') {
