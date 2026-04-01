@@ -78,7 +78,60 @@ self.addEventListener('message', async (event) => {
         }
     } else if (type === 'transcribe') {
         try {
-            const result = await transcriber(audioData, options);
+            // Calcula o número total de chunks baseado no tamanho do áudio
+            const sampleRate = 16000; // loadAudioData usa 16kHz
+            const chunkLengthS = options.chunk_length_s || 30;
+            const strideLengthS = options.stride_length_s || 5;
+            const totalDurationS = audioData.length / sampleRate;
+            
+            // Calcula chunks esperados: cada chunk avança (chunkLength - stride) segundos
+            const stepS = chunkLengthS - strideLengthS;
+            const totalChunks = Math.max(1, Math.ceil(totalDurationS / stepS));
+            let processedChunks = 0;
+
+            // Envia info inicial sobre a transcrição
+            self.postMessage({ 
+                type: 'transcription_progress', 
+                data: { 
+                    processedChunks: 0, 
+                    totalChunks, 
+                    totalDurationS,
+                    status: 'started' 
+                } 
+            });
+
+            // Adiciona chunk_callback para progresso real chunk-a-chunk
+            const transcribeOptions = { 
+                ...options,
+                chunk_callback: (chunk) => {
+                    processedChunks++;
+                    self.postMessage({ 
+                        type: 'transcription_progress', 
+                        data: { 
+                            processedChunks, 
+                            totalChunks,
+                            totalDurationS,
+                            status: 'transcribing',
+                            // Envia texto parcial para feedback visual
+                            partialText: chunk?.text || ''
+                        } 
+                    });
+                }
+            };
+
+            const result = await transcriber(audioData, transcribeOptions);
+            
+            // Envia progresso final antes do resultado
+            self.postMessage({ 
+                type: 'transcription_progress', 
+                data: { 
+                    processedChunks: totalChunks, 
+                    totalChunks,
+                    totalDurationS,
+                    status: 'completed' 
+                } 
+            });
+
             self.postMessage({ type: 'result', data: result });
         } catch (error) {
             self.postMessage({ type: 'error', error: error.message });

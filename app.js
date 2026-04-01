@@ -377,12 +377,14 @@ async function startTranscription() {
             aiWorker = new Worker('worker.js', { type: 'module' });
         }
 
-        const runCommand = (commandData, onProgress) => {
+        const runCommand = (commandData, onProgress, onTranscriptionProgress) => {
             return new Promise((resolve, reject) => {
                 const handler = (event) => {
                     const { type, data, error } = event.data;
                     if (type === 'progress') {
                         if (onProgress) onProgress(data);
+                    } else if (type === 'transcription_progress') {
+                        if (onTranscriptionProgress) onTranscriptionProgress(data);
                     } else if (type === 'ready') {
                         aiWorker.removeEventListener('message', handler);
                         resolve();
@@ -405,9 +407,9 @@ async function startTranscription() {
             (progress) => {
                 if (progress.status === 'progress' && progress.progress) {
                     const pct = Math.round(progress.progress);
-                    updateProgress('Baixando modelo de IA...', `${progress.file || ''} — ${pct}%`, 5 + (pct * 0.25));
+                    updateProgressDirect('Baixando modelo de IA...', `${progress.file || ''} — ${pct}%`, 5 + (pct * 0.25));
                 } else if (progress.status === 'ready') {
-                    updateProgress('Modelo carregado!', 'Iniciando transcrições...', 35);
+                    updateProgressDirect('Modelo carregado!', 'Iniciando transcrições...', 35);
                 }
             }
         );
@@ -416,17 +418,71 @@ async function startTranscription() {
         const opts = { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true };
         if (lang) opts.language = lang;
 
+        // Faixa de progresso: 35% (modelo pronto) até 95% (antes de finalizar)
+        const PROGRESS_START = 35;
+        const PROGRESS_END = 95;
+        const PROGRESS_RANGE = PROGRESS_END - PROGRESS_START;
+
         for (let i = 0; i < totalFiles; i++) {
             const { file } = currentFiles[i];
             const fileNum = i + 1;
-            const baseProgress = 35 + ((i / totalFiles) * 55);
-            const fileProgress = 55 / totalFiles;
-
-            updateProgress(`Processando áudio ${fileNum}/${totalFiles}...`, file.name, baseProgress + (fileProgress * 0.2));
+            
+            // Cada arquivo recebe uma fatia proporcional do range de progresso
+            const fileSliceStart = PROGRESS_START + ((i / totalFiles) * PROGRESS_RANGE);
+            const fileSliceSize = PROGRESS_RANGE / totalFiles;
+            
+            // Fase 1: Decodificando áudio (10% da fatia do arquivo)
+            updateProgressDirect(
+                `Decodificando áudio ${fileNum}/${totalFiles}...`, 
+                file.name, 
+                fileSliceStart
+            );
             const audioData = await loadAudioData(file);
 
-            updateProgress(`Transcrevendo ${fileNum}/${totalFiles}...`, file.name, baseProgress + (fileProgress * 0.4));
-            const result = await runCommand({ type: 'transcribe', audioData, options: opts });
+            // Fase 2: Transcrevendo com progresso real chunk-a-chunk (85% da fatia)
+            const transcribeStart = fileSliceStart + (fileSliceSize * 0.10);
+            const transcribeRange = fileSliceSize * 0.85;
+            
+            updateProgressDirect(
+                `Transcrevendo ${fileNum}/${totalFiles}...`, 
+                `${file.name} — Preparando...`, 
+                transcribeStart
+            );
+
+            const result = await runCommand(
+                { type: 'transcribe', audioData, options: opts },
+                null, // onProgress (model loading) - not needed here
+                (tProgress) => {
+                    // tProgress = { processedChunks, totalChunks, totalDurationS, status, partialText }
+                    if (tProgress.status === 'started') {
+                        const durStr = formatDuration(tProgress.totalDurationS);
+                        updateProgress(
+                            `Transcrevendo ${fileNum}/${totalFiles}...`, 
+                            `${file.name} — ${durStr} de áudio — ${tProgress.totalChunks} chunks`, 
+                            transcribeStart
+                        );
+                    } else if (tProgress.status === 'transcribing') {
+                        const chunkPct = tProgress.processedChunks / tProgress.totalChunks;
+                        const currentPct = transcribeStart + (chunkPct * transcribeRange);
+                        const processedSec = Math.min(
+                            tProgress.processedChunks * (opts.chunk_length_s - opts.stride_length_s),
+                            tProgress.totalDurationS
+                        );
+                        const detail = `${file.name} — ${formatDuration(processedSec)} / ${formatDuration(tProgress.totalDurationS)}`;
+                        updateProgress(
+                            `Transcrevendo ${fileNum}/${totalFiles}... (chunk ${tProgress.processedChunks}/${tProgress.totalChunks})`, 
+                            detail, 
+                            currentPct
+                        );
+                    } else if (tProgress.status === 'completed') {
+                        updateProgressDirect(
+                            `Concluído ${fileNum}/${totalFiles}`, 
+                            file.name, 
+                            fileSliceStart + fileSliceSize
+                        );
+                    }
+                }
+            );
 
             transcriptionResults.push({
                 fileName: file.name,
@@ -434,18 +490,23 @@ async function startTranscription() {
                 chunks: result.chunks || []
             });
 
-            updateProgress(`Concluído ${fileNum}/${totalFiles}`, file.name, baseProgress + fileProgress);
+            // Fase 3: Arquivo concluído (5% da fatia)
+            updateProgressDirect(
+                `Concluído ${fileNum}/${totalFiles}`, 
+                file.name, 
+                fileSliceStart + fileSliceSize
+            );
         }
 
-        updateProgress('Finalizando...', 'Formatando resultados', 95);
+        updateProgressDirect('Finalizando...', 'Formatando resultados', 96);
         displayAllResults();
-        updateProgress('Concluído!', `${totalFiles} arquivo${totalFiles > 1 ? 's' : ''} transcrito${totalFiles > 1 ? 's' : ''}`, 100);
+        updateProgressDirect('Concluído!', `${totalFiles} arquivo${totalFiles > 1 ? 's' : ''} transcrito${totalFiles > 1 ? 's' : ''}`, 100);
 
         setTimeout(() => {
             progressSection.classList.add('hidden');
             resultSection.classList.remove('hidden');
             fileInfoSection.classList.add('hidden');
-        }, 500);
+        }, 800);
 
     } catch (error) {
         console.error('Transcription error:', error);
@@ -1096,15 +1157,26 @@ function writeString(view, offset, string) {
 }
 
 // Throttle function for progress updates to reduce DOM manipulations
+// Improved: ensures final calls (>=100% or phase changes) are never dropped
 function throttle(func, limit) {
     let inThrottle;
+    let lastArgs;
+    let lastContext;
+    let timeoutId;
     return function() {
-        const args = arguments;
-        const context = this;
+        lastArgs = arguments;
+        lastContext = this;
         if (!inThrottle) {
-            func.apply(context, args);
+            func.apply(lastContext, lastArgs);
             inThrottle = true;
-            setTimeout(() => inThrottle = false, limit);
+            timeoutId = setTimeout(() => {
+                inThrottle = false;
+                // Flush any pending call that was blocked during throttle
+                if (lastArgs) {
+                    func.apply(lastContext, lastArgs);
+                    lastArgs = null;
+                }
+            }, limit);
         }
     }
 }
@@ -1318,16 +1390,26 @@ function downloadFile(filename, content, mimeType) {
     URL.revokeObjectURL(url);
 }
 
-// Throttled progress update functions
+// Throttled progress update functions (for frequent chunk-by-chunk updates)
 const throttledUpdateProgress = throttle(function(title, detail, percent) {
     progressTitle.textContent = title;
     progressDetail.textContent = detail;
     progressBar.style.width = `${Math.min(percent, 100)}%`;
     progressPercent.textContent = `${Math.round(percent)}%`;
-}, 100); // Update at most every 100ms
+}, 80); // Update at most every 80ms for smooth animation
 
+// Throttled version — use for frequent updates (chunk progress)
 function updateProgress(title, detail, percent) {
     throttledUpdateProgress(title, detail, percent);
+}
+
+// Direct (non-throttled) version — use for critical/phase-change updates
+// that MUST be reflected immediately (model loaded, file completed, 100%, etc.)
+function updateProgressDirect(title, detail, percent) {
+    progressTitle.textContent = title;
+    progressDetail.textContent = detail;
+    progressBar.style.width = `${Math.min(percent, 100)}%`;
+    progressPercent.textContent = `${Math.round(percent)}%`;
 }
 
 function showToast(message, type = 'success') {
