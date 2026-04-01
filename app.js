@@ -19,6 +19,7 @@ const btnAddMore = document.getElementById('btn-add-more');
 const btnTranscribe = document.getElementById('btn-transcribe');
 const languageSelect = document.getElementById('language-select');
 const modelSelect = document.getElementById('model-select');
+const speedSelect = document.getElementById('speed-select');
 const progressSection = document.getElementById('progress-section');
 const progressTitle = document.getElementById('progress-title');
 const progressDetail = document.getElementById('progress-detail');
@@ -367,11 +368,18 @@ async function startTranscription() {
     const totalFiles = currentFiles.length;
 
     try {
-        const selectedModel = modelSelect.value;
+        const speedMode = speedSelect ? speedSelect.value : 'balanced';
+        const speedConfig = getSpeedConfig(speedMode);
+        const selectedModel = resolveModelSelection(modelSelect.value);
         const selectedLang = languageSelect.value;
         const lang = selectedLang === 'null' ? null : selectedLang;
+        const modelLabel = getModelLabel(modelSelect.value, selectedModel);
 
-        updateProgressDirect('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
+        updateProgressDirect(
+            'Carregando modelo de IA...',
+            `Modelo: ${modelLabel} • Prioridade: ${speedConfig.label} — pode levar um minuto na primeira vez`,
+            5
+        );
 
         // Initialize worker with cache buster to force update
         if (!aiWorker) {
@@ -408,7 +416,20 @@ async function startTranscription() {
                     }
                 };
                 aiWorker.addEventListener('message', handler);
-                aiWorker.postMessage(commandData);
+                const transferList = [];
+                if (commandData?.type === 'transcribe' && ArrayBuffer.isView(commandData.audioData)) {
+                    transferList.push(commandData.audioData.buffer);
+                }
+
+                try {
+                    if (transferList.length > 0) {
+                        aiWorker.postMessage(commandData, transferList);
+                    } else {
+                        aiWorker.postMessage(commandData);
+                    }
+                } catch (err) {
+                    aiWorker.postMessage(commandData);
+                }
             });
         };
 
@@ -434,7 +455,11 @@ async function startTranscription() {
         );
 
         // Transcribe each file
-        const opts = { chunk_length_s: 15, stride_length_s: 5, return_timestamps: true };
+        const opts = {
+            chunk_length_s: speedConfig.chunk,
+            stride_length_s: speedConfig.stride,
+            return_timestamps: true
+        };
         if (lang) opts.language = lang;
 
         // Faixa de progresso: 35% (modelo pronto) até 95% (antes de finalizar)
@@ -1445,6 +1470,38 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function getDeviceProfile() {
+    const memory = navigator.deviceMemory || 4;
+    const cores = navigator.hardwareConcurrency || 4;
+    const isLowEnd = memory <= 4 || cores <= 4;
+    return { memory, cores, isLowEnd };
+}
+
+function resolveModelSelection(selected) {
+    if (selected && selected !== 'auto') return selected;
+    const { memory, cores, isLowEnd } = getDeviceProfile();
+    if (isLowEnd) return 'onnx-community/whisper-tiny';
+    if (memory <= 8 || cores <= 6) return 'onnx-community/whisper-base';
+    return 'onnx-community/whisper-small';
+}
+
+function getModelLabel(selectedValue, resolvedModel) {
+    const modelName = (resolvedModel || '').split('/').pop() || 'whisper';
+    if (selectedValue && selectedValue !== 'auto') return modelName;
+    return `Auto (${modelName})`;
+}
+
+function getSpeedConfig(mode) {
+    const { isLowEnd } = getDeviceProfile();
+    if (mode === 'fast') {
+        return { chunk: isLowEnd ? 20 : 30, stride: 5, label: 'Rápido' };
+    }
+    if (mode === 'accurate') {
+        return { chunk: 15, stride: 5, label: 'Precisão' };
+    }
+    return { chunk: isLowEnd ? 15 : 20, stride: 5, label: 'Equilibrado' };
 }
 
 function clampPercent(value) {

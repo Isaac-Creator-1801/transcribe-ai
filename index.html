@@ -137,11 +137,20 @@
                 <div class="setting-group">
                     <label class="setting-label">Modelo de Inteligência</label>
                     <select class="setting-select" id="model-select">
+                        <option value="auto" selected>🤖 Auto (Recomendado)</option>
                         <option value="onnx-community/whisper-tiny">⚡ Tiny (~150MB - Ultra Rápido)</option>
-                        <option value="onnx-community/whisper-base" selected>⚖️ Base (~290MB - Equilibrado / Recomendado)</option>
+                        <option value="onnx-community/whisper-base">⚖️ Base (~290MB - Equilibrado)</option>
                         <option value="onnx-community/whisper-small">🔍 Small (~950MB - Alta Precisão)</option>
                         <option value="onnx-community/whisper-large-v3-turbo">🚀 Large V3 Turbo (~850MB - Rápido e Elite)</option>
                         <option value="Xenova/whisper-large-v2">💎 Large V2 (~3.3GB - Qualidade Máxima, Apenas PC)</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label class="setting-label">Prioridade</label>
+                    <select class="setting-select" id="speed-select">
+                        <option value="fast" selected>⚡ Rápido (Recomendado)</option>
+                        <option value="balanced">⚖️ Equilibrado</option>
+                        <option value="accurate">🎯 Precisão</option>
                     </select>
                 </div>
             </div>

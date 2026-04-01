@@ -6,6 +6,8 @@ env.useBrowserCache = true;
 // Garante caminhos corretos para WASM se necessário
 env.backends.onnx.wasm.simd = true; 
 env.backends.onnx.wasm.proxy = false; // Manter no mesmo thread do worker geralmente é mais rápido aqui
+const maxThreads = Math.max(1, Math.min(4, self.navigator?.hardwareConcurrency || 4));
+env.backends.onnx.wasm.numThreads = maxThreads;
 
 
 let transcriber = null;
