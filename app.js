@@ -483,102 +483,53 @@ async function startTranscription() {
             );
             const audioData = await loadAudioData(file);
 
-            // Fase 2: Transcrevendo com progresso real chunk-a-chunk (85% da fatia)
+            // Fase 2: Transcrevendo (segmentado para maior estabilidade)
             const transcribeStart = fileSliceStart + (fileSliceSize * 0.10);
             const transcribeRange = fileSliceSize * 0.85;
-            const transcribeCap = transcribeStart + (transcribeRange * 0.9);
-            let displayPct = transcribeStart;
-            let lastProcessedChunks = 0;
-            const fallbackStep = Math.max(transcribeRange * 0.015, 0.6);
-            let lastProgressTick = Date.now();
-            let lastTitle = `Transcrevendo ${fileNum}/${totalFiles}...`;
-            let lastDetail = `${file.name} — Preparando...`;
+            const sampleRate = 16000;
+            const totalSamples = audioData.length;
+            const segments = buildSegments(totalSamples, sampleRate, speedConfig.segmentSec, speedConfig.overlapSec);
+            const segmentCount = segments.length;
+            const combinedChunks = [];
+            let combinedText = '';
 
-            const touchProgress = () => {
-                lastProgressTick = Date.now();
-            };
+            for (let segIndex = 0; segIndex < segmentCount; segIndex++) {
+                const { start, end } = segments[segIndex];
+                const segmentData = audioData.slice(start, end);
+                const segmentInfo = segmentCount > 1 ? `Parte ${segIndex + 1}/${segmentCount}` : '';
+                const segmentLabel = segmentInfo ? ` • ${segmentInfo}` : '';
+                const segmentStartPct = transcribeStart + ((start / totalSamples) * transcribeRange);
+                const segmentEndPct = transcribeStart + ((end / totalSamples) * transcribeRange);
 
-            const bumpFallbackProgress = () => {
-                displayPct = Math.min(transcribeCap, displayPct + fallbackStep);
-            };
+                const segmentResult = await transcribeSegmentWithProgress({
+                    segmentData,
+                    segmentStartPct,
+                    segmentEndPct,
+                    file,
+                    fileNum,
+                    totalFiles,
+                    segmentLabel,
+                    segmentInfo,
+                    opts,
+                    runCommand
+                });
 
-            const watchdogId = setInterval(() => {
-                if (Date.now() - lastProgressTick < 2500) return;
-                bumpFallbackProgress();
-                updateProgress(lastTitle, lastDetail, displayPct);
-            }, 1000);
-            
-            updateProgressDirect(
-                `Transcrevendo ${fileNum}/${totalFiles}...`, 
-                `${file.name} — Preparando...`, 
-                transcribeStart
-            );
+                const offsetSec = start / sampleRate;
+                const dropBeforeSec = segIndex === 0 ? 0 : speedConfig.overlapSec;
+                const normalized = normalizeSegmentResult(segmentResult, offsetSec, dropBeforeSec);
 
-            let result;
-            try {
-                result = await runCommand(
-                    { type: 'transcribe', audioData, options: opts },
-                    null, // onProgress (model loading) - not needed here
-                    (tProgress) => {
-                        // tProgress = { processedChunks, totalChunks, totalDurationS, status, partialText }
-                        touchProgress();
-
-                        if (tProgress.status === 'started') {
-                            displayPct = transcribeStart;
-                            lastProcessedChunks = 0;
-                            const durStr = formatDuration(tProgress.totalDurationS);
-                            lastTitle = `Transcrevendo ${fileNum}/${totalFiles}...`;
-                            lastDetail = `${file.name} — ${durStr} de áudio — ${tProgress.totalChunks} chunks`;
-                            updateProgress(
-                                lastTitle,
-                                lastDetail,
-                                transcribeStart
-                            );
-                        } else if (tProgress.status === 'transcribing') {
-                            const processedChunks = Number(tProgress.processedChunks) || 0;
-                            const totalChunks = Number(tProgress.totalChunks) || 0;
-                            const hasChunkProgress = totalChunks > 0 && processedChunks > lastProcessedChunks;
-
-                            if (hasChunkProgress) {
-                                const chunkPct = processedChunks / totalChunks;
-                                const currentPct = transcribeStart + (chunkPct * transcribeRange);
-                                displayPct = Math.max(displayPct, currentPct);
-                                lastProcessedChunks = processedChunks;
-                            } else if (tProgress.isHeartbeat) {
-                                bumpFallbackProgress();
-                            }
-
-                            const chunkLabel = processedChunks > 0 && totalChunks > 0
-                                ? ` (chunk ${processedChunks}/${totalChunks})`
-                                : '';
-
-                            const processedSec = Math.min(
-                                processedChunks * (opts.chunk_length_s - opts.stride_length_s),
-                                tProgress.totalDurationS || 0
-                            );
-                            const detail = processedChunks > 0
-                                ? `${file.name} — ${formatDuration(processedSec)} / ${formatDuration(tProgress.totalDurationS)}`
-                                : `${file.name} — Processando...`;
-
-                            lastTitle = `Transcrevendo ${fileNum}/${totalFiles}...${chunkLabel}`;
-                            lastDetail = detail;
-                            updateProgress(
-                                lastTitle,
-                                lastDetail,
-                                displayPct
-                            );
-                        } else if (tProgress.status === 'completed') {
-                            updateProgressDirect(
-                                `Concluído ${fileNum}/${totalFiles}`, 
-                                file.name, 
-                                fileSliceStart + fileSliceSize
-                            );
-                        }
-                    }
-                );
-            } finally {
-                clearInterval(watchdogId);
+                if (normalized.chunks.length > 0) {
+                    combinedChunks.push(...normalized.chunks);
+                }
+                if (normalized.text) {
+                    combinedText = combinedText ? `${combinedText}\n${normalized.text}` : normalized.text;
+                }
             }
+
+            const result = {
+                text: combinedText.trim(),
+                chunks: combinedChunks
+            };
 
             transcriptionResults.push({
                 fileName: file.name,
@@ -1496,12 +1447,152 @@ function getModelLabel(selectedValue, resolvedModel) {
 function getSpeedConfig(mode) {
     const { isLowEnd } = getDeviceProfile();
     if (mode === 'fast') {
-        return { chunk: isLowEnd ? 20 : 30, stride: 5, label: 'Rápido' };
+        return { chunk: 20, stride: 5, label: 'Rápido', segmentSec: isLowEnd ? 120 : 180, overlapSec: 1 };
     }
     if (mode === 'accurate') {
-        return { chunk: 15, stride: 5, label: 'Precisão' };
+        return { chunk: 15, stride: 5, label: 'Precisão', segmentSec: isLowEnd ? 60 : 120, overlapSec: 1 };
     }
-    return { chunk: isLowEnd ? 15 : 20, stride: 5, label: 'Equilibrado' };
+    return { chunk: isLowEnd ? 15 : 20, stride: 5, label: 'Equilibrado', segmentSec: isLowEnd ? 90 : 150, overlapSec: 1 };
+}
+
+function buildSegments(totalSamples, sampleRate, segmentSec, overlapSec) {
+    const safeSegmentSec = Math.max(5, segmentSec || 120);
+    const safeOverlapSec = Math.max(0, Math.min(overlapSec || 0, safeSegmentSec / 2));
+    const segmentSamples = Math.max(1, Math.floor(safeSegmentSec * sampleRate));
+    const overlapSamples = Math.max(0, Math.floor(safeOverlapSec * sampleRate));
+    const stepSamples = Math.max(1, segmentSamples - overlapSamples);
+    const segments = [];
+    let start = 0;
+
+    while (start < totalSamples) {
+        const end = Math.min(totalSamples, start + segmentSamples);
+        segments.push({ start, end });
+        if (end >= totalSamples) break;
+        start += stepSamples;
+    }
+
+    return segments;
+}
+
+function normalizeSegmentResult(result, offsetSec, dropBeforeSec) {
+    const rawChunks = Array.isArray(result?.chunks) ? result.chunks : [];
+    const filteredChunks = rawChunks.filter(chunk => {
+        const ts = chunk?.timestamp;
+        if (!Array.isArray(ts) || ts.length < 2) return true;
+        const end = Number(ts[1]) || 0;
+        return end > dropBeforeSec;
+    });
+
+    const adjustedChunks = filteredChunks.map(chunk => {
+        const ts = Array.isArray(chunk.timestamp) ? chunk.timestamp : null;
+        if (!ts || ts.length < 2) return chunk;
+        return {
+            ...chunk,
+            timestamp: [ts[0] + offsetSec, ts[1] + offsetSec]
+        };
+    });
+
+    const text = adjustedChunks.length > 0
+        ? adjustedChunks.map(c => String(c.text || '').trim()).filter(Boolean).join(' ')
+        : String(result?.text || '').trim();
+
+    return { text, chunks: adjustedChunks };
+}
+
+async function transcribeSegmentWithProgress({
+    segmentData,
+    segmentStartPct,
+    segmentEndPct,
+    file,
+    fileNum,
+    totalFiles,
+    segmentLabel,
+    segmentInfo,
+    opts,
+    runCommand
+}) {
+    const segmentRange = Math.max(0.1, segmentEndPct - segmentStartPct);
+    const segmentCap = Math.min(segmentEndPct - 0.6, segmentStartPct + (segmentRange * 0.98));
+    let displayPct = segmentStartPct;
+    let lastProcessedChunks = 0;
+    const fallbackStep = Math.max(segmentRange * 0.02, 0.5);
+    let lastProgressTick = Date.now();
+    const baseTitle = `Transcrevendo ${fileNum}/${totalFiles}...${segmentLabel}`;
+    const baseDetail = segmentInfo ? `${file.name} — ${segmentInfo}` : file.name;
+    let lastTitle = baseTitle;
+    let lastDetail = `${baseDetail} — Preparando...`;
+
+    const touchProgress = () => {
+        lastProgressTick = Date.now();
+    };
+
+    const bumpFallbackProgress = () => {
+        displayPct = Math.min(segmentCap, displayPct + fallbackStep);
+    };
+
+    const watchdogId = setInterval(() => {
+        if (Date.now() - lastProgressTick < 2500) return;
+        bumpFallbackProgress();
+        updateProgress(lastTitle, lastDetail, displayPct);
+    }, 1000);
+
+    updateProgressDirect(baseTitle, lastDetail, segmentStartPct);
+
+    let result;
+    try {
+        result = await runCommand(
+            { type: 'transcribe', audioData: segmentData, options: opts },
+            null,
+            (tProgress) => {
+                touchProgress();
+
+                if (tProgress.status === 'started') {
+                    displayPct = segmentStartPct;
+                    lastProcessedChunks = 0;
+                    const durStr = formatDuration(tProgress.totalDurationS || (segmentData.length / 16000));
+                    const chunkInfo = tProgress.totalChunks ? ` — ${tProgress.totalChunks} chunks` : '';
+                    lastTitle = baseTitle;
+                    lastDetail = `${baseDetail} — ${durStr} de áudio${chunkInfo}`;
+                    updateProgress(lastTitle, lastDetail, segmentStartPct);
+                } else if (tProgress.status === 'transcribing') {
+                    const processedChunks = Number(tProgress.processedChunks) || 0;
+                    const totalChunks = Number(tProgress.totalChunks) || 0;
+                    const hasChunkProgress = totalChunks > 0 && processedChunks > lastProcessedChunks;
+
+                    if (hasChunkProgress) {
+                        const chunkPct = processedChunks / totalChunks;
+                        const currentPct = segmentStartPct + (chunkPct * segmentRange);
+                        displayPct = Math.max(displayPct, currentPct);
+                        lastProcessedChunks = processedChunks;
+                    } else if (tProgress.isHeartbeat) {
+                        bumpFallbackProgress();
+                    }
+
+                    const chunkLabel = processedChunks > 0 && totalChunks > 0
+                        ? ` (chunk ${processedChunks}/${totalChunks})`
+                        : '';
+
+                    const processedSec = Math.min(
+                        processedChunks * (opts.chunk_length_s - opts.stride_length_s),
+                        tProgress.totalDurationS || 0
+                    );
+                    const detail = processedChunks > 0
+                        ? `${baseDetail} — ${formatDuration(processedSec)} / ${formatDuration(tProgress.totalDurationS)}`
+                        : `${baseDetail} — Processando...`;
+
+                    lastTitle = `${baseTitle}${chunkLabel}`;
+                    lastDetail = detail;
+                    updateProgress(lastTitle, lastDetail, displayPct);
+                } else if (tProgress.status === 'completed') {
+                    updateProgressDirect(baseTitle, `${baseDetail} — Concluído`, segmentEndPct);
+                }
+            }
+        );
+    } finally {
+        clearInterval(watchdogId);
+    }
+
+    return result;
 }
 
 function clampPercent(value) {
