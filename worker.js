@@ -32,6 +32,7 @@ self.addEventListener('message', async (event) => {
                 
                 // q4 é mais otimizado para WebGPU (gasta menos memória GPU), q8 funciona apenas para CPU
                 // Na versão 3, 'fp32' para encoder e 'q4' para decoder é um bom equilíbrio
+                // Para modelos Large no CPU, q8 pode ser lento, mas q4 (GGUF/BitNet) ainda é instável no WASM
                 let dtype = canUseGPU ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8';
 
                 console.log(`Iniciando backend: ${device} (dtype: ${JSON.stringify(dtype)})`);
@@ -78,33 +79,47 @@ self.addEventListener('message', async (event) => {
         }
     } else if (type === 'transcribe') {
         try {
-            // Calcula o número total de chunks baseado no tamanho do áudio
-            const sampleRate = 16000; // loadAudioData usa 16kHz
-            const chunkLengthS = options.chunk_length_s || 30;
+            const sampleRate = 16000;
+            const chunkLengthS = options.chunk_length_s || 15;
             const strideLengthS = options.stride_length_s || 5;
             const totalDurationS = audioData.length / sampleRate;
             
-            // Calcula chunks esperados: cada chunk avança (chunkLength - stride) segundos
             const stepS = chunkLengthS - strideLengthS;
             const totalChunks = Math.max(1, Math.ceil(totalDurationS / stepS));
             let processedChunks = 0;
 
-            // Envia info inicial sobre a transcrição
+            // Envia info inicial
             self.postMessage({ 
                 type: 'transcription_progress', 
-                data: { 
-                    processedChunks: 0, 
-                    totalChunks, 
-                    totalDurationS,
-                    status: 'started' 
-                } 
+                data: { processedChunks: 0, totalChunks, totalDurationS, status: 'started' } 
             });
 
-            // Adiciona chunk_callback para progresso real chunk-a-chunk
+            // Callback principal para progresso
+            const onChunkDone = (chunk) => {
+                processedChunks++;
+                console.log(`Worker: Chunk ${processedChunks}/${totalChunks} processado.`);
+                self.postMessage({ 
+                    type: 'transcription_progress', 
+                    data: { 
+                        processedChunks, 
+                        totalChunks,
+                        totalDurationS,
+                        status: 'transcribing',
+                        partialText: chunk?.text || ''
+                    } 
+                });
+            };
+
+            // Adiciona callbacks redundantes para garantir que a v3 capture
             const transcribeOptions = { 
                 ...options,
-                chunk_callback: (chunk) => {
-                    processedChunks++;
+                chunk_callback: onChunkDone, // Padrão Transformers.js ASR
+                callback_function: onChunkDone // Algumas versões e modelos usam esse alias
+            };
+
+            // Timer de segurança (Heartbeat) - Se um chunk demorar mais que 10s, avisa o site
+            const heartbeat = setInterval(() => {
+                if (processedChunks < totalChunks) {
                     self.postMessage({ 
                         type: 'transcription_progress', 
                         data: { 
@@ -112,16 +127,16 @@ self.addEventListener('message', async (event) => {
                             totalChunks,
                             totalDurationS,
                             status: 'transcribing',
-                            // Envia texto parcial para feedback visual
-                            partialText: chunk?.text || ''
+                            isHeartbeat: true 
                         } 
                     });
                 }
-            };
+            }, 10000);
 
             const result = await transcriber(audioData, transcribeOptions);
             
-            // Envia progresso final antes do resultado
+            clearInterval(heartbeat);
+
             self.postMessage({ 
                 type: 'transcription_progress', 
                 data: { 

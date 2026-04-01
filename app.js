@@ -376,6 +376,15 @@ async function startTranscription() {
         if (!aiWorker) {
             const cacheBuster = Date.now();
             aiWorker = new Worker(`worker.js?v=${cacheBuster}`, { type: 'module' });
+            
+            // Global error handler for worker crashes (e.g. OOM)
+            aiWorker.onerror = (err) => {
+                console.error('Worker crash caught:', err);
+                progressSection.classList.add('hidden');
+                btnTranscribe.style.display = 'flex';
+                btnTranscribe.disabled = false;
+                showToast('O motor de IA parou inesperadamente. Tente usar um modelo menor (ex: Base ou Small).', 'error');
+            };
         }
 
         const runCommand = (commandData, onProgress, onTranscriptionProgress) => {
@@ -416,7 +425,7 @@ async function startTranscription() {
         );
 
         // Transcribe each file
-        const opts = { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true };
+        const opts = { chunk_length_s: 15, stride_length_s: 5, return_timestamps: true };
         if (lang) opts.language = lang;
 
         // Faixa de progresso: 35% (modelo pronto) até 95% (antes de finalizar)
