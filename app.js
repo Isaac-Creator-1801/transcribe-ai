@@ -73,6 +73,7 @@ const previewIcon = document.getElementById('preview-icon');
 // =========================================
 let currentFiles = [];
 let aiWorker = null;
+let currentModelId = null;
 let transcriptionResults = [];
 let mediaRecorder = null;
 let audioChunks = [];
@@ -84,6 +85,33 @@ let fileIdCounter = 0;
 let converterFiles = [];
 let converterResults = [];
 let converterFileIdCounter = 0;
+
+function initWorker() {
+    const cacheBuster = Date.now();
+    aiWorker = new Worker(`worker.js?v=${cacheBuster}`, { type: 'module' });
+
+    // Global error handler for worker crashes (e.g. OOM)
+    aiWorker.onerror = (err) => {
+        console.error('Worker crash caught:', err);
+        progressSection.classList.add('hidden');
+        btnTranscribe.style.display = 'flex';
+        btnTranscribe.disabled = false;
+        showToast('O motor de IA parou inesperadamente. Tente usar um modelo menor (ex: Base ou Tiny).', 'error');
+    };
+}
+
+function ensureWorker() {
+    if (!aiWorker) initWorker();
+}
+
+function restartWorker() {
+    if (aiWorker) {
+        aiWorker.terminate();
+    }
+    aiWorker = null;
+    currentModelId = null;
+    initWorker();
+}
 
 // =========================================
 // Mapeamento de Formatos (Estilo CloudConvert)
@@ -370,31 +398,12 @@ async function startTranscription() {
     try {
         const speedMode = speedSelect ? speedSelect.value : 'balanced';
         const speedConfig = getSpeedConfig(speedMode);
-        const selectedModel = resolveModelSelection(modelSelect.value);
+        const selectedModel = resolveModelSelection(modelSelect.value, speedMode);
+        const modelCandidates = buildFallbackModels(selectedModel);
+        let activeModel = modelCandidates[0];
         const selectedLang = languageSelect.value;
         const lang = selectedLang === 'null' ? null : selectedLang;
-        const modelLabel = getModelLabel(modelSelect.value, selectedModel);
-
-        updateProgressDirect(
-            'Carregando modelo de IA...',
-            `Modelo: ${modelLabel} • Prioridade: ${speedConfig.label} — pode levar um minuto na primeira vez`,
-            5
-        );
-
-        // Initialize worker with cache buster to force update
-        if (!aiWorker) {
-            const cacheBuster = Date.now();
-            aiWorker = new Worker(`worker.js?v=${cacheBuster}`, { type: 'module' });
-            
-            // Global error handler for worker crashes (e.g. OOM)
-            aiWorker.onerror = (err) => {
-                console.error('Worker crash caught:', err);
-                progressSection.classList.add('hidden');
-                btnTranscribe.style.display = 'flex';
-                btnTranscribe.disabled = false;
-                showToast('O motor de IA parou inesperadamente. Tente usar um modelo menor (ex: Base ou Small).', 'error');
-            };
-        }
+        const autoLabel = modelSelect.value === 'auto';
 
         const runCommand = (commandData, onProgress, onTranscriptionProgress) => {
             return new Promise((resolve, reject) => {
@@ -433,26 +442,42 @@ async function startTranscription() {
             });
         };
 
-        // Load model
-        await runCommand(
-            { type: 'load', model: selectedModel },
-            (progress) => {
-                const pct = getProgressPercent(progress);
-                if (pct !== null) {
-                    const safePct = clampPercent(pct);
-                    const fileLabel = progress?.file || progress?.name || 'Baixando...';
-                    updateProgressDirect(
-                        'Baixando modelo de IA...',
-                        `${fileLabel} — ${Math.round(safePct)}%`,
-                        5 + (safePct * 0.25)
-                    );
-                }
+        const loadModelWithProgress = async (modelId, reason, progressBase = 5, progressRange = 30) => {
+            const label = autoLabel ? `Auto (${formatModelName(modelId)})` : formatModelName(modelId);
+            const prefix = reason ? `${reason} — ` : '';
+            updateProgressDirect(
+                'Carregando modelo de IA...',
+                `${prefix}Modelo: ${label} • Prioridade: ${speedConfig.label} — pode levar um minuto na primeira vez`,
+                progressBase
+            );
 
-                if (progress?.status === 'ready' || progress?.status === 'done') {
-                    updateProgressDirect('Modelo carregado!', 'Iniciando transcrições...', 35);
+            await runCommand(
+                { type: 'load', model: modelId },
+                (progress) => {
+                    const pct = getProgressPercent(progress);
+                    if (pct !== null) {
+                        const safePct = clampPercent(pct);
+                        const fileLabel = progress?.file || progress?.name || 'Baixando...';
+                        updateProgressDirect(
+                            'Baixando modelo de IA...',
+                            `${fileLabel} — ${Math.round(safePct)}%`,
+                            progressBase + ((safePct / 100) * progressRange)
+                        );
+                    }
+
+                    if (progress?.status === 'ready' || progress?.status === 'done') {
+                        updateProgressDirect('Modelo carregado!', 'Iniciando transcrições...', progressBase + progressRange);
+                    }
                 }
-            }
-        );
+            );
+
+            currentModelId = modelId;
+        };
+
+        ensureWorker();
+
+        // Load model
+        await loadModelWithProgress(activeModel, '', 5, 30);
 
         // Transcribe each file
         const opts = {
@@ -500,19 +525,41 @@ async function startTranscription() {
                 const segmentLabel = segmentInfo ? ` • ${segmentInfo}` : '';
                 const segmentStartPct = transcribeStart + ((start / totalSamples) * transcribeRange);
                 const segmentEndPct = transcribeStart + ((end / totalSamples) * transcribeRange);
+                const segmentSeconds = (end - start) / sampleRate;
+                const stallTimeoutMs = getStallTimeoutMs(segmentSeconds);
 
-                const segmentResult = await transcribeSegmentWithProgress({
-                    segmentData,
-                    segmentStartPct,
-                    segmentEndPct,
-                    file,
-                    fileNum,
-                    totalFiles,
-                    segmentLabel,
-                    segmentInfo,
-                    opts,
-                    runCommand
-                });
+                let segmentResult;
+                for (let attempt = 0; attempt < modelCandidates.length; attempt++) {
+                    try {
+                        segmentResult = await transcribeSegmentWithProgress({
+                            segmentData,
+                            segmentStartPct,
+                            segmentEndPct,
+                            file,
+                            fileNum,
+                            totalFiles,
+                            segmentLabel,
+                            segmentInfo,
+                            opts,
+                            runCommand,
+                            stallTimeoutMs
+                        });
+                        break;
+                    } catch (err) {
+                        const isLastAttempt = attempt >= modelCandidates.length - 1;
+                        if (isLastAttempt) throw err;
+                        activeModel = modelCandidates[attempt + 1];
+                        updateProgressDirect(
+                            'Reiniciando motor de IA...',
+                            `Trocando para ${formatModelName(activeModel)} — tentando novamente`,
+                            segmentStartPct
+                        );
+                        restartWorker();
+                        const fallbackBase = Math.max(5, segmentStartPct);
+                        const fallbackRange = Math.min(6, Math.max(2, segmentEndPct - segmentStartPct));
+                        await loadModelWithProgress(activeModel, 'Reiniciando motor de IA', fallbackBase, fallbackRange);
+                    }
+                }
 
                 const offsetSec = start / sampleRate;
                 const dropBeforeSec = segIndex === 0 ? 0 : speedConfig.overlapSec;
@@ -1430,10 +1477,19 @@ function getDeviceProfile() {
     return { memory, cores, isLowEnd };
 }
 
-function resolveModelSelection(selected) {
+function resolveModelSelection(selected, speedMode = 'balanced') {
     if (selected && selected !== 'auto') return selected;
     const { memory, cores, isLowEnd } = getDeviceProfile();
-    if (isLowEnd) return 'onnx-community/whisper-tiny';
+
+    if (isLowEnd) {
+        return speedMode === 'accurate'
+            ? 'onnx-community/whisper-base'
+            : 'onnx-community/whisper-tiny';
+    }
+
+    if (speedMode === 'fast') return 'onnx-community/whisper-base';
+    if (speedMode === 'accurate') return 'onnx-community/whisper-small';
+
     if (memory <= 8 || cores <= 6) return 'onnx-community/whisper-base';
     return 'onnx-community/whisper-small';
 }
@@ -1447,12 +1503,33 @@ function getModelLabel(selectedValue, resolvedModel) {
 function getSpeedConfig(mode) {
     const { isLowEnd } = getDeviceProfile();
     if (mode === 'fast') {
-        return { chunk: 20, stride: 5, label: 'Rápido', segmentSec: isLowEnd ? 120 : 180, overlapSec: 1 };
+        return { chunk: 20, stride: 5, label: 'Rápido', segmentSec: isLowEnd ? 60 : 90, overlapSec: 1 };
     }
     if (mode === 'accurate') {
-        return { chunk: 15, stride: 5, label: 'Precisão', segmentSec: isLowEnd ? 60 : 120, overlapSec: 1 };
+        return { chunk: 15, stride: 5, label: 'Precisão', segmentSec: isLowEnd ? 45 : 75, overlapSec: 1 };
     }
-    return { chunk: isLowEnd ? 15 : 20, stride: 5, label: 'Equilibrado', segmentSec: isLowEnd ? 90 : 150, overlapSec: 1 };
+    return { chunk: isLowEnd ? 15 : 20, stride: 5, label: 'Equilibrado', segmentSec: isLowEnd ? 60 : 90, overlapSec: 1 };
+}
+
+function formatModelName(modelId) {
+    if (!modelId) return 'modelo';
+    return modelId.split('/').pop();
+}
+
+function buildFallbackModels(primaryModel) {
+    const fallbackOrder = [
+        'onnx-community/whisper-small',
+        'onnx-community/whisper-base',
+        'onnx-community/whisper-tiny'
+    ];
+    const models = [primaryModel, ...fallbackOrder].filter(Boolean);
+    return Array.from(new Set(models));
+}
+
+function getStallTimeoutMs(segmentSeconds) {
+    const baseTimeout = 120000;
+    const scaledTimeout = Math.ceil(segmentSeconds * 2500);
+    return Math.max(baseTimeout, scaledTimeout);
 }
 
 function buildSegments(totalSamples, sampleRate, segmentSec, overlapSec) {
@@ -1509,7 +1586,8 @@ async function transcribeSegmentWithProgress({
     segmentLabel,
     segmentInfo,
     opts,
-    runCommand
+    runCommand,
+    stallTimeoutMs
 }) {
     const segmentRange = Math.max(0.1, segmentEndPct - segmentStartPct);
     const segmentCap = Math.min(segmentEndPct - 0.6, segmentStartPct + (segmentRange * 0.98));
@@ -1521,6 +1599,9 @@ async function transcribeSegmentWithProgress({
     const baseDetail = segmentInfo ? `${file.name} — ${segmentInfo}` : file.name;
     let lastTitle = baseTitle;
     let lastDetail = `${baseDetail} — Preparando...`;
+    const effectiveTimeoutMs = Math.max(30000, stallTimeoutMs || 120000);
+    let stallTimerId;
+    let stallReject;
 
     const touchProgress = () => {
         lastProgressTick = Date.now();
@@ -1528,6 +1609,17 @@ async function transcribeSegmentWithProgress({
 
     const bumpFallbackProgress = () => {
         displayPct = Math.min(segmentCap, displayPct + fallbackStep);
+    };
+
+    const resetStallTimer = () => {
+        if (stallTimerId) clearTimeout(stallTimerId);
+        stallTimerId = setTimeout(() => {
+            if (stallReject) {
+                const err = new Error('segment_stalled');
+                err.code = 'STALL';
+                stallReject(err);
+            }
+        }, effectiveTimeoutMs);
     };
 
     const watchdogId = setInterval(() => {
@@ -1540,11 +1632,17 @@ async function transcribeSegmentWithProgress({
 
     let result;
     try {
-        result = await runCommand(
+        const stallPromise = new Promise((_, reject) => {
+            stallReject = reject;
+        });
+        resetStallTimer();
+
+        const resultPromise = runCommand(
             { type: 'transcribe', audioData: segmentData, options: opts },
             null,
             (tProgress) => {
                 touchProgress();
+                resetStallTimer();
 
                 if (tProgress.status === 'started') {
                     displayPct = segmentStartPct;
@@ -1588,8 +1686,11 @@ async function transcribeSegmentWithProgress({
                 }
             }
         );
+
+        result = await Promise.race([resultPromise, stallPromise]);
     } finally {
         clearInterval(watchdogId);
+        if (stallTimerId) clearTimeout(stallTimerId);
     }
 
     return result;
