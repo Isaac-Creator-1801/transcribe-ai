@@ -372,9 +372,10 @@ async function startTranscription() {
 
         updateProgress('Carregando modelo de IA...', `Modelo: ${selectedModel.split('/')[1]} — pode levar um minuto na primeira vez`, 5);
 
-        // Initialize worker
+        // Initialize worker with cache buster to force update
         if (!aiWorker) {
-            aiWorker = new Worker('worker.js', { type: 'module' });
+            const cacheBuster = Date.now();
+            aiWorker = new Worker(`worker.js?v=${cacheBuster}`, { type: 'module' });
         }
 
         const runCommand = (commandData, onProgress, onTranscriptionProgress) => {
