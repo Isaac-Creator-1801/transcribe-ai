@@ -461,6 +461,14 @@ async function startTranscription() {
             // Fase 2: Transcrevendo com progresso real chunk-a-chunk (85% da fatia)
             const transcribeStart = fileSliceStart + (fileSliceSize * 0.10);
             const transcribeRange = fileSliceSize * 0.85;
+            const transcribeCap = transcribeStart + (transcribeRange * 0.9);
+            let displayPct = transcribeStart;
+            let lastProcessedChunks = 0;
+            const fallbackStep = Math.max(transcribeRange * 0.015, 0.6);
+
+            const bumpFallbackProgress = () => {
+                displayPct = Math.min(transcribeCap, displayPct + fallbackStep);
+            };
             
             updateProgressDirect(
                 `Transcrevendo ${fileNum}/${totalFiles}...`, 
@@ -474,6 +482,8 @@ async function startTranscription() {
                 (tProgress) => {
                     // tProgress = { processedChunks, totalChunks, totalDurationS, status, partialText }
                     if (tProgress.status === 'started') {
+                        displayPct = transcribeStart;
+                        lastProcessedChunks = 0;
                         const durStr = formatDuration(tProgress.totalDurationS);
                         updateProgress(
                             `Transcrevendo ${fileNum}/${totalFiles}...`, 
@@ -481,17 +491,34 @@ async function startTranscription() {
                             transcribeStart
                         );
                     } else if (tProgress.status === 'transcribing') {
-                        const chunkPct = tProgress.processedChunks / tProgress.totalChunks;
-                        const currentPct = transcribeStart + (chunkPct * transcribeRange);
+                        const processedChunks = Number(tProgress.processedChunks) || 0;
+                        const totalChunks = Number(tProgress.totalChunks) || 0;
+                        const hasChunkProgress = totalChunks > 0 && processedChunks > lastProcessedChunks;
+
+                        if (hasChunkProgress) {
+                            const chunkPct = processedChunks / totalChunks;
+                            const currentPct = transcribeStart + (chunkPct * transcribeRange);
+                            displayPct = Math.max(displayPct, currentPct);
+                            lastProcessedChunks = processedChunks;
+                        } else if (tProgress.isHeartbeat) {
+                            bumpFallbackProgress();
+                        }
+
+                        const chunkLabel = processedChunks > 0 && totalChunks > 0
+                            ? ` (chunk ${processedChunks}/${totalChunks})`
+                            : '';
+
                         const processedSec = Math.min(
-                            tProgress.processedChunks * (opts.chunk_length_s - opts.stride_length_s),
-                            tProgress.totalDurationS
+                            processedChunks * (opts.chunk_length_s - opts.stride_length_s),
+                            tProgress.totalDurationS || 0
                         );
-                        const detail = `${file.name} — ${formatDuration(processedSec)} / ${formatDuration(tProgress.totalDurationS)}`;
+                        const detail = processedChunks > 0
+                            ? `${file.name} — ${formatDuration(processedSec)} / ${formatDuration(tProgress.totalDurationS)}`
+                            : `${file.name} — Processando...`;
                         updateProgress(
-                            `Transcrevendo ${fileNum}/${totalFiles}... (chunk ${tProgress.processedChunks}/${tProgress.totalChunks})`, 
+                            `Transcrevendo ${fileNum}/${totalFiles}...${chunkLabel}`, 
                             detail, 
-                            currentPct
+                            displayPct
                         );
                     } else if (tProgress.status === 'completed') {
                         updateProgressDirect(
