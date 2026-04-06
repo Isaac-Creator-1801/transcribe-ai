@@ -647,9 +647,11 @@ async function loadAudioData(file) {
 
     const decodePromise = (async () => {
         const ext = file.name.split('.').pop().toLowerCase();
-        const isVideoFile = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi', 'webm', 'mov'].includes(ext);
+        const isVideoFile = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi', 'webm', 'mov', 'm4v'].includes(ext);
         
         let audioData;
+        
+        console.log('Decodificando arquivo:', file.name, 'ext:', ext, 'type:', file.type, 'isVideo:', isVideoFile);
         
         if (isVideoFile) {
             audioData = await extractAudioFromVideo(file);
@@ -668,6 +670,11 @@ async function loadAudioData(file) {
             await audioContext.close();
         }
         
+        console.log('Áudio extraído. Tamanho:', audioData?.length);
+        if (!audioData || audioData.length === 0) {
+            throw new Error('Áudio extraído está vazio');
+        }
+        
         return audioData;
     })();
 
@@ -675,33 +682,44 @@ async function loadAudioData(file) {
 }
 
 async function extractAudioFromVideo(file) {
+    const objectUrl = URL.createObjectURL(file);
+    
     try {
-        const arrayBuffer = await file.arrayBuffer();
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const audioEl = document.createElement('audio');
+        audioEl.src = objectUrl;
+        audioEl.muted = true;
         
-        try {
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            
-            let audioData;
-            if (audioBuffer.numberOfChannels > 1) {
-                const ch0 = audioBuffer.getChannelData(0);
-                const ch1 = audioBuffer.getChannelData(1);
-                audioData = new Float32Array(ch0.length);
-                for (let i = 0; i < ch0.length; i++) {
-                    audioData[i] = (ch0[i] + ch1[i]) / 2;
-                }
-            } else {
-                audioData = audioBuffer.getChannelData(0);
-            }
-            
-            await audioContext.close();
-            return audioData;
-        } catch (decodeErr) {
-            await audioContext.close();
-            throw decodeErr;
-        }
+        await new Promise((resolve, reject) => {
+            audioEl.onloadedmetadata = resolve;
+            audioEl.onerror = () => reject(new Error('Erro ao carregar áudio do vídeo'));
+            audioEl.load();
+        });
+        
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaElementSource(audioEl);
+        
+        const offlineCtx = new OfflineAudioContext({
+            numberOfChannels: 1,
+            length: Math.ceil(audioEl.duration * 16000),
+            sampleRate: 16000
+        });
+        
+        source.connect(offlineCtx.destination);
+        
+        const renderedBuffer = await offlineCtx.startRendering();
+        let audioData = renderedBuffer.getChannelData(0);
+        
+        audioData = new Float32Array(audioData);
+        
+        audioEl.src = '';
+        URL.revokeObjectURL(objectUrl);
+        await audioContext.close();
+        await offlineCtx.close();
+        
+        return audioData;
     } catch (err) {
-        throw new Error('Falha ao decodificar áudio do vídeo: ' + err.message);
+        URL.revokeObjectURL(objectUrl);
+        throw new Error('Falha ao extrair áudio do vídeo: ' + err.message);
     }
 }
 
