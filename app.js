@@ -80,6 +80,8 @@ let audioChunks = [];
 let recordingInterval = null;
 let startTime = null;
 let fileIdCounter = 0;
+let workerCrashPromise = null;
+let workerCrashReject = null;
 
 // Converter state
 let converterFiles = [];
@@ -90,9 +92,17 @@ function initWorker() {
     const cacheBuster = Date.now();
     aiWorker = new Worker(`worker.js?v=${cacheBuster}`, { type: 'module' });
 
+    // Create a crash promise that runCommand can race against
+    workerCrashPromise = new Promise((_, reject) => {
+        workerCrashReject = reject;
+    });
+
     // Global error handler for worker crashes (e.g. OOM)
     aiWorker.onerror = (err) => {
         console.error('Worker crash caught:', err);
+        if (workerCrashReject) {
+            workerCrashReject(new Error('worker_crashed'));
+        }
         progressSection.classList.add('hidden');
         btnTranscribe.style.display = 'flex';
         btnTranscribe.disabled = false;
@@ -110,6 +120,9 @@ function restartWorker() {
     }
     aiWorker = null;
     currentModelId = null;
+    // Reset crash promise
+    workerCrashPromise = null;
+    workerCrashReject = null;
     initWorker();
 }
 
@@ -437,7 +450,16 @@ async function startTranscription() {
                         aiWorker.postMessage(commandData);
                     }
                 } catch (err) {
-                    aiWorker.postMessage(commandData);
+                    reject(err);
+                    return;
+                }
+
+                // Race against worker crash
+                if (workerCrashPromise) {
+                    workerCrashPromise.catch((crashErr) => {
+                        aiWorker.removeEventListener('message', handler);
+                        reject(crashErr);
+                    });
                 }
             });
         };
@@ -618,20 +640,88 @@ async function startTranscription() {
 // =========================================
 
 async function loadAudioData(file) {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    let audioData;
-    if (audioBuffer.numberOfChannels > 1) {
-        const ch0 = audioBuffer.getChannelData(0);
-        const ch1 = audioBuffer.getChannelData(1);
-        audioData = new Float32Array(ch0.length);
-        for (let i = 0; i < ch0.length; i++) audioData[i] = (ch0[i] + ch1[i]) / 2;
-    } else {
-        audioData = audioBuffer.getChannelData(0);
+    const timeoutMs = 60000;
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout ao decodificar áudio. O arquivo pode ser muito grande ou estar corrompido.')), timeoutMs);
+    });
+
+    const decodePromise = (async () => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const isVideoFile = file.type.startsWith('video/') || ['mp4', 'mkv', 'avi', 'webm', 'mov'].includes(ext);
+        
+        let audioData;
+        
+        if (isVideoFile) {
+            audioData = await extractAudioFromVideo(file);
+        } else {
+            const arrayBuffer = await file.arrayBuffer();
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            if (audioBuffer.numberOfChannels > 1) {
+                const ch0 = audioBuffer.getChannelData(0);
+                const ch1 = audioBuffer.getChannelData(1);
+                audioData = new Float32Array(ch0.length);
+                for (let i = 0; i < ch0.length; i++) audioData[i] = (ch0[i] + ch1[i]) / 2;
+            } else {
+                audioData = audioBuffer.getChannelData(0);
+            }
+            await audioContext.close();
+        }
+        
+        return audioData;
+    })();
+
+    return Promise.race([decodePromise, timeoutPromise]);
+}
+
+async function extractAudioFromVideo(file) {
+    const objectUrl = URL.createObjectURL(file);
+    let audioContext = null;
+    
+    try {
+        const video = document.createElement('video');
+        video.src = objectUrl;
+        video.muted = true;
+        video.volume = 0;
+        video.crossOrigin = 'anonymous';
+        
+        await new Promise((resolve, reject) => {
+            video.onloadedmetadata = resolve;
+            video.onerror = () => reject(new Error('Erro ao carregar vídeo'));
+            video.load();
+        });
+        
+        const duration = video.duration;
+        if (!duration || !isFinite(duration)) {
+            throw new Error('Duração do vídeo inválida');
+        }
+        
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const offlineCtx = new OfflineAudioContext(1, duration * 16000, 16000);
+        const source = offlineCtx.createMediaElementSource(video);
+        source.connect(offlineCtx.destination);
+        
+        const renderedBuffer = await offlineCtx.startRendering();
+        let audioData = renderedBuffer.getChannelData(0);
+        
+        if (!audioData || audioData.length === 0) {
+            throw new Error('Áudio do vídeo está vazio');
+        }
+        
+        audioData = new Float32Array(audioData);
+        
+        video.src = '';
+        URL.revokeObjectURL(objectUrl);
+        await audioContext.close();
+        
+        return audioData;
+    } catch (err) {
+        if (audioContext) {
+            try { await audioContext.close(); } catch (e) {}
+        }
+        URL.revokeObjectURL(objectUrl);
+        throw err;
     }
-    await audioContext.close();
-    return audioData;
 }
 
 // =========================================
@@ -1527,9 +1617,9 @@ function buildFallbackModels(primaryModel) {
 }
 
 function getStallTimeoutMs(segmentSeconds) {
-    const baseTimeout = 120000;
-    const scaledTimeout = Math.ceil(segmentSeconds * 2500);
-    return Math.max(baseTimeout, scaledTimeout);
+    const baseTimeout = 45000;
+    const scaledTimeout = Math.ceil(segmentSeconds * 1200);
+    return Math.min(Math.max(baseTimeout, scaledTimeout), 60000);
 }
 
 function buildSegments(totalSamples, sampleRate, segmentSec, overlapSec) {
@@ -1623,10 +1713,10 @@ async function transcribeSegmentWithProgress({
     };
 
     const watchdogId = setInterval(() => {
-        if (Date.now() - lastProgressTick < 2500) return;
+        if (Date.now() - lastProgressTick < 3000) return;
         bumpFallbackProgress();
         updateProgress(lastTitle, lastDetail, displayPct);
-    }, 1000);
+    }, 500);
 
     updateProgressDirect(baseTitle, lastDetail, segmentStartPct);
 
