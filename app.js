@@ -675,63 +675,33 @@ async function loadAudioData(file) {
 }
 
 async function extractAudioFromVideo(file) {
-    const objectUrl = URL.createObjectURL(file);
-    let audioContext = null;
-    let video = null;
-    
     try {
-        video = document.createElement('video');
-        video.src = objectUrl;
-        video.muted = true;
-        video.volume = 0;
+        const arrayBuffer = await file.arrayBuffer();
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         
-        await new Promise((resolve, reject) => {
-            video.onloadedmetadata = resolve;
-            video.onerror = () => reject(new Error('Erro ao carregar vídeo'));
-            video.load();
-        });
-        
-        const duration = video.duration;
-        if (!duration || !isFinite(duration)) {
-            throw new Error('Duração do vídeo inválida');
+        try {
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            let audioData;
+            if (audioBuffer.numberOfChannels > 1) {
+                const ch0 = audioBuffer.getChannelData(0);
+                const ch1 = audioBuffer.getChannelData(1);
+                audioData = new Float32Array(ch0.length);
+                for (let i = 0; i < ch0.length; i++) {
+                    audioData[i] = (ch0[i] + ch1[i]) / 2;
+                }
+            } else {
+                audioData = audioBuffer.getChannelData(0);
+            }
+            
+            await audioContext.close();
+            return audioData;
+        } catch (decodeErr) {
+            await audioContext.close();
+            throw decodeErr;
         }
-        
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        const offlineCtx = new OfflineAudioContext({
-            numberOfChannels: 1,
-            length: Math.ceil(duration * 16000),
-            sampleRate: 16000
-        });
-        
-        const source = offlineCtx.createMediaElementSource(video);
-        const gainNode = offlineCtx.createGain();
-        gainNode.gain.value = 1;
-        source.connect(gainNode);
-        gainNode.connect(offlineCtx.destination);
-        
-        const renderedBuffer = await offlineCtx.startRendering();
-        let audioData = renderedBuffer.getChannelData(0);
-        
-        if (!audioData || audioData.length === 0) {
-            throw new Error('Áudio do vídeo está vazio');
-        }
-        
-        audioData = new Float32Array(audioData);
-        
-        video.src = '';
-        URL.revokeObjectURL(objectUrl);
-        await audioContext.close();
-        await offlineCtx.close();
-        
-        return audioData;
     } catch (err) {
-        if (video) video.src = '';
-        URL.revokeObjectURL(objectUrl);
-        if (audioContext) {
-            try { await audioContext.close(); } catch (e) {}
-        }
-        throw err;
+        throw new Error('Falha ao decodificar áudio do vídeo: ' + err.message);
     }
 }
 
