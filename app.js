@@ -677,13 +677,13 @@ async function loadAudioData(file) {
 async function extractAudioFromVideo(file) {
     const objectUrl = URL.createObjectURL(file);
     let audioContext = null;
+    let video = null;
     
     try {
-        const video = document.createElement('video');
+        video = document.createElement('video');
         video.src = objectUrl;
         video.muted = true;
         video.volume = 0;
-        video.crossOrigin = 'anonymous';
         
         await new Promise((resolve, reject) => {
             video.onloadedmetadata = resolve;
@@ -696,10 +696,19 @@ async function extractAudioFromVideo(file) {
             throw new Error('Duração do vídeo inválida');
         }
         
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const offlineCtx = new OfflineAudioContext(1, duration * 16000, 16000);
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        const offlineCtx = new OfflineAudioContext({
+            numberOfChannels: 1,
+            length: Math.ceil(duration * 16000),
+            sampleRate: 16000
+        });
+        
         const source = offlineCtx.createMediaElementSource(video);
-        source.connect(offlineCtx.destination);
+        const gainNode = offlineCtx.createGain();
+        gainNode.gain.value = 1;
+        source.connect(gainNode);
+        gainNode.connect(offlineCtx.destination);
         
         const renderedBuffer = await offlineCtx.startRendering();
         let audioData = renderedBuffer.getChannelData(0);
@@ -713,13 +722,15 @@ async function extractAudioFromVideo(file) {
         video.src = '';
         URL.revokeObjectURL(objectUrl);
         await audioContext.close();
+        await offlineCtx.close();
         
         return audioData;
     } catch (err) {
+        if (video) video.src = '';
+        URL.revokeObjectURL(objectUrl);
         if (audioContext) {
             try { await audioContext.close(); } catch (e) {}
         }
-        URL.revokeObjectURL(objectUrl);
         throw err;
     }
 }
