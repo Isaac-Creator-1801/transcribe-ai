@@ -135,6 +135,16 @@ self.addEventListener('message', async (event) => {
                 }
             }, 10000);
 
+            console.log('Worker: Transcribing audio data. Type:', typeof audioData, 'Length:', audioData?.length, 'Is Float32Array:', audioData instanceof Float32Array);
+
+            if (!audioData || !(audioData instanceof Float32Array)) {
+                throw new Error('Dados de áudio inválidos: esperado Float32Array');
+            }
+
+            if (audioData.length === 0) {
+                throw new Error('Dados de áudio estão vazios');
+            }
+
             const result = await transcriber(audioData, transcribeOptions);
             
             clearInterval(heartbeat);
