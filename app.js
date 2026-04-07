@@ -665,7 +665,8 @@ async function loadAudioData(file) {
                 audioData = new Float32Array(ch0.length);
                 for (let i = 0; i < ch0.length; i++) audioData[i] = (ch0[i] + ch1[i]) / 2;
             } else {
-                audioData = audioBuffer.getChannelData(0);
+                // Cria cópia explícita para garantir buffer próprio ao transferir ao worker
+                audioData = new Float32Array(audioBuffer.getChannelData(0));
             }
             await audioContext.close();
         }
