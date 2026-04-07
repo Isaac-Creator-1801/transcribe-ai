@@ -439,15 +439,22 @@ async function startTranscription() {
                 };
                 aiWorker.addEventListener('message', handler);
                 const transferList = [];
+                let messageData = commandData;
                 if (commandData?.type === 'transcribe' && ArrayBuffer.isView(commandData.audioData)) {
-                    transferList.push(commandData.audioData.buffer);
+                    // Cria uma CÓPIA do Float32Array para transfer ao worker.
+                    // Isso preserva o buffer original (segmentData) intacto para possíveis retentativas.
+                    // Sem essa cópia, o buffer fica "detached" após o 1º postMessage e retries falham com
+                    // "ArrayBuffer at index 0 is already detached".
+                    const audioCopy = commandData.audioData.slice();
+                    messageData = { ...commandData, audioData: audioCopy };
+                    transferList.push(audioCopy.buffer);
                 }
 
                 try {
                     if (transferList.length > 0) {
-                        aiWorker.postMessage(commandData, transferList);
+                        aiWorker.postMessage(messageData, transferList);
                     } else {
-                        aiWorker.postMessage(commandData);
+                        aiWorker.postMessage(messageData);
                     }
                 } catch (err) {
                     reject(err);
