@@ -682,44 +682,46 @@ async function loadAudioData(file) {
 }
 
 async function extractAudioFromVideo(file) {
-    const objectUrl = URL.createObjectURL(file);
-    
     try {
-        const audioEl = document.createElement('audio');
-        audioEl.src = objectUrl;
-        audioEl.muted = true;
-        
-        await new Promise((resolve, reject) => {
-            audioEl.onloadedmetadata = resolve;
-            audioEl.onerror = () => reject(new Error('Erro ao carregar áudio do vídeo'));
-            audioEl.load();
-        });
-        
+        // Usa ArrayBuffer diretamente, que funciona perfeitamente com OfflineAudioContext e evita o erro 'different audio context' gerado por createMediaElementSource
+        const arrayBuffer = await file.arrayBuffer();
+        const sampleRate = 16000;
+
+        // Decodifica usando AudioContext online para processar o formato de vídeo
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaElementSource(audioEl);
-        
-        const offlineCtx = new OfflineAudioContext({
-            numberOfChannels: 1,
-            length: Math.ceil(audioEl.duration * 16000),
-            sampleRate: 16000
-        });
-        
-        source.connect(offlineCtx.destination);
-        
-        const renderedBuffer = await offlineCtx.startRendering();
-        let audioData = renderedBuffer.getChannelData(0);
-        
-        audioData = new Float32Array(audioData);
-        
-        audioEl.src = '';
-        URL.revokeObjectURL(objectUrl);
+        const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
         await audioContext.close();
-        await offlineCtx.close();
-        
+
+        let audioData;
+
+        // Se o sample rate for diferente, refaz a amostragem com OfflineAudioContext
+        if (decodedBuffer.sampleRate !== sampleRate) {
+            const frameCount = Math.ceil(decodedBuffer.duration * sampleRate);
+            const offlineCtx = new OfflineAudioContext(1, frameCount, sampleRate);
+            const bufferSource = offlineCtx.createBufferSource();
+            bufferSource.buffer = decodedBuffer;
+            bufferSource.connect(offlineCtx.destination);
+            bufferSource.start();
+            
+            const resampled = await offlineCtx.startRendering();
+            audioData = new Float32Array(resampled.getChannelData(0));
+        } else {
+            // Mistura os canais se for estéreo
+            if (decodedBuffer.numberOfChannels > 1) {
+                const ch0 = decodedBuffer.getChannelData(0);
+                const ch1 = decodedBuffer.getChannelData(1);
+                audioData = new Float32Array(ch0.length);
+                for (let i = 0; i < ch0.length; i++) {
+                    audioData[i] = (ch0[i] + ch1[i]) / 2;
+                }
+            } else {
+                audioData = new Float32Array(decodedBuffer.getChannelData(0));
+            }
+        }
+
         return audioData;
     } catch (err) {
-        URL.revokeObjectURL(objectUrl);
-        throw new Error('Falha ao extrair áudio do vídeo: ' + err.message);
+        throw new Error('Falha ao decodificar arquivo do vídeo: ' + err.message);
     }
 }
 
